@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -66,23 +67,79 @@ def _candidats_jsonld(donnee):
             yield donnee
 
 
-def depuis_url(url: str):
-    """Récupère une offre depuis N'IMPORTE QUELLE URL exposant un balisage
-    `JobPosting` (schema.org) — le standard que la quasi-totalité des sites
-    d'emploi publient pour le référencement, y compris ceux qui rendent le
-    reste de la page côté client (React, Next.js...). C'est ce balisage,
-    pas le HTML visible, qui rend cette fonction générique.
+def _meta(soup, propriete: str) -> str:
+    balise = soup.find("meta", property=propriete) or soup.find("meta", attrs={"name": propriete})
+    return (balise.get("content") or "").strip() if balise else ""
 
-    Sans lui, retourne None plutôt que de deviner un titre ou une
-    description depuis le texte brut de la page — la source de vérité du CV
-    reste `cv_source.yaml`, jamais une extraction approximative.
+
+def _depuis_jsonld(soup) -> dict | None:
+    """Cherche un bloc `JobPosting` (schema.org) dans les scripts JSON-LD de
+    la page. C'est le niveau de confiance le plus haut : c'est le site
+    lui-même qui déclare titre, entreprise, lieu et description."""
+    import json as _json
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            donnee = _json.loads(script.get_text() or "")
+        except ValueError:
+            continue
+        for candidat in _candidats_jsonld(donnee):
+            if candidat.get("@type") == "JobPosting":
+                return candidat
+    return None
+
+
+def _depuis_page_brute(soup, url: str):
+    """Repli quand la page ne déclare aucun `JobPosting` : le titre vient de
+    `og:title` (ou de `<title>`, nettoyé du suffixe du site), la
+    « description » est le texte visible de la page une fois la navigation,
+    les formulaires et les scripts écartés.
+
+    Moins fiable qu'un JSON-LD — les balises génériques n'exposent presque
+    jamais l'entreprise proprement, elle est donc laissée vide plutôt que
+    devinée depuis un `og:site_name` souvent tronqué ou accolé au nom du
+    portail d'offres."""
+    from core.models import Job
+
+    titre = _meta(soup, "og:title")
+    if not titre and soup.title:
+        # « Poste (H/F) | Site emploi X » → on ne garde que le premier segment.
+        titre = re.split(r"\s*[|–—-]\s*", soup.title.get_text(strip=True))[0]
+    titre = titre.strip()
+    if not titre:
+        return None
+
+    for balise in soup(["script", "style", "nav", "header", "footer", "form"]):
+        balise.decompose()
+    description = re.sub(r"\n{3,}", "\n\n", soup.get_text("\n", strip=True))
+    if not description:
+        return None
+
+    log.warning("aucune donnée structurée JobPosting sur %s — repli sur le "
+               "titre et le texte visible de la page, moins fiable : "
+               "vérifie le résultat", url)
+    return Job(source="url", external_id=url, title=titre, company="",
+              location="", url=url, description=description)
+
+
+def depuis_url(url: str):
+    """Récupère une offre depuis N'IMPORTE QUELLE URL. Deux niveaux :
+
+    1. Balisage `JobPosting` (schema.org), que la quasi-totalité des sites
+       d'emploi publient pour le référencement, y compris ceux qui rendent
+       le reste de la page côté client (React, Next.js...) — c'est ce
+       balisage, pas le HTML visible, qui rend ce niveau fiable ;
+    2. à défaut, `og:title`/`<title>` et le texte visible de la page,
+       débarrassé de la navigation — moins précis, à relire.
+
+    Si même ce repli échoue (page inaccessible, ou sans titre exploitable),
+    retourne None plutôt que d'inventer un contenu — la source de vérité du
+    CV reste `cv_source.yaml`, jamais une extraction approximative.
 
     Renvoie un `Job` NON scoré : c'est à l'appelant de le faire passer par
     le pipeline habituel (`classify` + `score`) pour obtenir des tags
     comparables à ceux d'une offre déjà en base.
     """
-    import json as _json
-
     from bs4 import BeautifulSoup
     from curl_cffi import requests as cffi
 
@@ -102,23 +159,9 @@ def depuis_url(url: str):
         return None
 
     soup = BeautifulSoup(r.text, "lxml")
-    offre = None
-    for script in soup.find_all("script", type="application/ld+json"):
-        try:
-            donnee = _json.loads(script.get_text() or "")
-        except ValueError:
-            continue
-        for candidat in _candidats_jsonld(donnee):
-            if candidat.get("@type") == "JobPosting":
-                offre = candidat
-                break
-        if offre:
-            break
-
+    offre = _depuis_jsonld(soup)
     if not offre:
-        log.warning("aucune donnée structurée JobPosting sur %s — ce site "
-                    "n'est pas exploitable par cette voie", url)
-        return None
+        return _depuis_page_brute(soup, url)
 
     titre = (offre.get("title") or "").strip()
     organisation = offre.get("hiringOrganization")
@@ -134,8 +177,9 @@ def depuis_url(url: str):
         if isinstance(adresse, dict) else ""
 
     if not (titre and description):
-        log.warning("JobPosting incomplet sur %s (titre ou description manquant)", url)
-        return None
+        log.warning("JobPosting incomplet sur %s (titre ou description manquant) "
+                    "— repli sur le texte visible", url)
+        return _depuis_page_brute(soup, url)
 
     return Job(source="url", external_id=url, title=titre, company=entreprise,
               location=ville, url=url, description=description)
