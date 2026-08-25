@@ -1,0 +1,726 @@
+# ============================================================
+#  Profil de recherche — exemple à copier en config.yaml et à personnaliser.
+#  config.yaml (le vrai) n'est jamais versionné : voir .gitignore.
+# ============================================================
+
+profil:
+  nom: "Ton Nom"
+  niveau: "ex. M1 — MSc Cloud & Mobile"
+  ecole: "Ton école"
+  rythme: "ex. 3 semaines entreprise / 1 semaine école"
+  demarrage: "ex. mi-septembre 2026"
+  base: "Ta ville (code postal)"
+
+# ------------------------------------------------------------
+#  Identité de candidature (`main.py postuler <uid>`)
+#  Sert UNIQUEMENT au pré-remplissage des formulaires. Rien n'est envoyé :
+#  le programme remplit, s'arrête, et c'est toi qui cliques.
+#
+#  Laisse vide ce que tu ne veux pas voir pré-rempli — un champ vide est
+#  simplement ignoré, jamais deviné.
+# ------------------------------------------------------------
+candidature:
+  prenom: "Ton prénom"
+  nom: "Ton nom"
+  email: "ton.email@exemple.fr"
+  # Sans espaces : certains formulaires refusent « 06 64 16 24 25 »
+  # à la validation, aucun ne refuse la forme collée.
+  telephone: ""
+  ville: "Ta ville"
+  code_postal: ""
+  adresse: ""
+  linkedin: ""
+  permis: ""
+
+  # Chemins absolus. Vérifiés à chaque lancement : un fichier déplacé est
+  # signalé plutôt que silencieusement ignoré.
+  cv: "C:/chemin/vers/CV.pdf"
+  lettre: "C:/chemin/vers/Lettre.pdf"
+
+  # Les étiquettes du scorer sont des noms de GROUPES internes — « bdd »,
+  # « web_front », « devops_ci » — parfaits pour trier, illisibles dans une
+  # lettre. Cette table les rend présentables ; toute étiquette absente d'ici
+  # est simplement omise du message plutôt qu'écrite telle quelle.
+  libelles_technos:
+    cloud: "cloud"
+    devops_ci: "DevOps et CI/CD"
+    web_front: "développement front-end"
+    bdd: "bases de données"
+    api: "API REST"
+    python: "Python"
+    java: "Java"
+    csharp: "C#"
+    php: "PHP"
+    typescript: "TypeScript"
+    mobile: "développement mobile"
+    tests_qualite: "tests et qualité logicielle"
+    archi: "architecture logicielle"
+    ia_data: "intelligence artificielle"
+
+  # Gabarit des champs libres (« message », « lettre de motivation »).
+  # Les accolades sont remplacées par les données RÉELLES de l'offre ; rien
+  # n'est inventé. Relis toujours avant d'envoyer : un gabarit reste un
+  # gabarit, et c'est ce qui distingue une candidature d'un publipostage.
+  message: |
+    Madame, Monsieur,
+
+    [Ta situation actuelle — formation, rythme d'alternance, disponibilité.]
+
+    Votre offre « {intitule} » chez {entreprise} correspond à ce que je
+    recherche{lieu}. {technos}
+
+    [Ta mobilité, permis, etc.]
+    Je serais heureux d'échanger avec vous sur ce poste.
+
+    Cordialement,
+    Ton prénom Ton nom
+
+# ------------------------------------------------------------
+#  Requêtes LinkedIn
+#  LinkedIn n'a AUCUN filtre "alternance" : on requête large,
+#  on filtre et on score localement (voir core/classify.py).
+# ------------------------------------------------------------
+recherche:
+  mots_cles:
+    # Cloud / DevOps — spécialité du MSc
+    - "alternance cloud"
+    - "alternance ingénieur cloud"
+    - "alternance devops"
+    - "alternance kubernetes docker"
+    - "alternance AWS"
+    - "alternance Azure"
+    # Mobile — deuxième pilier du MSc
+    - "alternance développeur mobile"
+    - "alternance flutter"
+    - "alternance développeur android"
+    # Développement — socle du CV
+    - "alternance développeur"
+    - "alternance développeur web"
+    - "alternance développeur full stack"
+    - "alternance développeur backend"
+    - "alternance développeur python"
+    - "alternance ingénieur logiciel"
+    - "alternance développeur C#"
+    - "alternance développeur java"
+    # IA appliquée au développement (profil ISO-K). Pas de mot-clé « data » :
+    # les postes de data engineer / data scientist sont exclus par
+    # `exclusions.metiers`, les collecter serait dépenser des requêtes pour rien.
+    - "alternance intelligence artificielle"
+    # Formulations alternatives
+    - "alternant développeur"
+    - "apprentissage développeur informatique"
+
+  # Mots-clés utilisés pour l'approfondissement ville par ville.
+  # Le produit cartésien complet (21 x 11) serait inutilement long : le filet
+  # national ci-dessus tourne sur TOUS les mots-clés, les villes sur ceux-ci.
+  mots_cles_villes:
+    - "alternance développeur"
+    - "alternance devops cloud"
+    - "alternance développeur mobile"
+    - "alternance développeur web"
+    - "alternance ingénieur logiciel"
+    - "alternance développeur python"
+
+  # "Partout en France" : une passe nationale + les grands bassins tech.
+  # Le rythme 3/1 rend la province jouable (1 semaine sur 4 à Paris).
+  lieux:
+    - "France"
+    - "Paris, Île-de-France, France"
+    - "Lyon, Auvergne-Rhône-Alpes, France"
+    - "Toulouse, Occitanie, France"
+    - "Nantes, Pays de la Loire, France"
+    - "Bordeaux, Nouvelle-Aquitaine, France"
+    - "Lille, Hauts-de-France, France"
+    - "Rennes, Bretagne, France"
+    - "Marseille, Provence-Alpes-Côte d'Azur, France"
+    - "Grenoble, Auvergne-Rhône-Alpes, France"
+    - "Sophia Antipolis, Provence-Alpes-Côte d'Azur, France"
+
+  # DÉSACTIVÉ — vérifié le 12/08/2026 : l'endpoint invité IGNORE le paramètre
+  # `f_WT`. Les requêtes sans filtre, "sur site", "à distance" et "hybride"
+  # renvoient les mêmes identifiants dans le même ordre. La passe coûtait
+  # 48 requêtes pour 6 offres nouvelles. Le télétravail reste détecté, mais
+  # via le texte des offres (bonus "télétravail" plus bas).
+  inclure_remote: false
+
+  # Fenêtre temporelle en heures. 336 h = 2 semaines : au-delà, une offre
+  # d'alternance est le plus souvent déjà pourvue ou en fin de processus.
+  fenetre_heures: 336
+  # Rejette après coup toute offre dont la date de publication dépasse ce
+  # nombre de jours — LinkedIn est parfois laxiste sur son propre f_TPR.
+  age_max_jours: 14
+
+  # Garde-fous anti-blocage
+  delai_entre_requetes: 3.0     # secondes entre deux appels
+  # 8 saturait sur TOUTES les requêtes du backfill (80 offres = 8 x 10) :
+  # la profondeur disponible n'était jamais épuisée. En régime quotidien
+  # (fenêtre 24 h) la pagination s'arrête d'elle-même bien avant.
+  max_pages_par_requete: 15
+  max_details_par_run: 250      # nb max de fiches détaillées par run
+
+# ------------------------------------------------------------
+#  HelloWork (collecteur séparé : `main.py hellowork`)
+#  Le site expose un VRAI filtre de contrat (c=Alternance) : inutile de
+#  mettre « alternance » dans les mots-clés, le tri est fait en amont.
+# ------------------------------------------------------------
+hellowork:
+  mots_cles:
+    - "développeur"
+    - "développeur web"
+    - "développeur full stack"
+    - "développeur mobile"
+    - "ingénieur logiciel"
+    - "devops"
+    - "cloud"
+    - "python"
+  pages_max: 6              # 30 offres par page
+  delai: 2.5
+  age_max_jours: 14
+  max_details_par_run: 150
+
+# ------------------------------------------------------------
+#  Indeed (collecteur séparé : `main.py indeed`)
+#  Débloqué via curl_cffi, qui rejoue l'empreinte TLS de Chrome — le 403
+#  d'Indeed était une détection de signature, pas un défi JavaScript.
+#  Les résultats viennent d'un bloc JSON structuré, pas du HTML.
+# ------------------------------------------------------------
+indeed:
+  mots_cles:
+    - "alternance développeur"
+    - "alternance développeur web"
+    - "alternance développeur full stack"
+    - "alternance devops"
+    - "alternance cloud"
+    - "alternance développeur mobile"
+    - "alternance ingénieur logiciel"
+    - "apprentissage développeur"
+  lieu: "France"
+  pages_max: 5              # 15 offres par page
+  delai: 4.0                # Indeed est plus chatouilleux que HelloWork
+  age_max_jours: 14
+  max_details_par_run: 120
+
+# ------------------------------------------------------------
+#  JobTeaser (collecteur séparé : `main.py jobteaser`)
+#  Réseau emploi des écoles : beaucoup d'alternances y sont exclusives.
+#  Débloqué via curl_cffi, comme Indeed.
+#
+#  « alternance » DOIT figurer dans chaque mot-clé : le filtre de contrat du
+#  site est purement décoratif côté URL (vérifié sur huit formes), seul le
+#  paramètre `q` filtre réellement. Avec « alternance » dedans, on obtient
+#  19 alternances sur 20 ; sans, 2 sur 22.
+# ------------------------------------------------------------
+jobteaser:
+  mots_cles:
+    - "alternance développeur"
+    - "alternance développeur web"
+    - "alternance devops"
+    - "alternance cloud"
+    - "alternance développeur mobile"
+    - "alternance ingénieur logiciel"
+    - "apprentissage développeur"
+  pages_max: 4              # ~20 offres par page
+  delai: 3.0
+  age_max_jours: 14
+  max_details_par_run: 120
+
+# ------------------------------------------------------------
+#  Welcome to the Jungle (collecteur séparé : `main.py wttj`)
+#  Index Algolia public, interrogé directement — pas de scraping HTML.
+#
+#  C'est la SEULE source dont le filtre de contrat a été vérifié comme vrai :
+#  `contract_type:APPRENTICESHIP` fait tomber l'index de 88 210 à 2 287
+#  offres, et 20/20 des remontées portent bien la facette. Inutile donc de
+#  mettre « alternance » dans les mots-clés : le tri est fait en amont, les
+#  mots-clés ne servent qu'à cibler le MÉTIER.
+#
+#  Ils servent aussi à contourner le plafond de 1 000 résultats d'Algolia :
+#  chaque mot-clé rend entre 14 et 191 offres, on reste très loin du mur.
+#  Mesuré : ces 15 requêtes donnent 362 offres uniques.
+# ------------------------------------------------------------
+wttj:
+  mots_cles:
+    # Cloud / DevOps — spécialité du MSc
+    - "cloud"
+    - "devops"
+    - "systeme reseau"
+    - "cybersecurite"
+    # Mobile — deuxième pilier du MSc
+    - "mobile"
+    # Développement
+    - "developpeur"
+    - "developpeur web"
+    - "fullstack"
+    - "backend"
+    - "frontend"
+    - "logiciel"
+    - "informatique"       # mesuré : 191 offres, le plus gros apport
+    - "react"              # mesuré : 158 offres
+    - "python"
+    - "javascript"
+  pages_max: 5              # 200 par page, plafond Algolia à 1 000
+  delai: 1.5                # API officielle : pas de raison de se brider
+  age_max_jours: 14
+  max_details_par_run: 150
+
+# ------------------------------------------------------------
+#  PASS — Place de l'Apprentissage et des Stages (`main.py pass`)
+#  Flux RSS officiel de l'État. Une seule requête pour toute la collecte :
+#  le flux porte les descriptions complètes, le niveau requis, la date de
+#  début, la durée ET l'adresse de candidature (balise `creator`).
+#
+#  Aucun mot-clé : le flux n'en accepte pas. On prend les 68 offres qu'il
+#  publie et le scorer trie — sur 68, 12 titres relèvent de la tech.
+#  Le flux ne pagine pas et ne remonte pas l'historique : c'est une source
+#  de FRAÎCHEUR, qui prend sa valeur en tournant tous les jours.
+# ------------------------------------------------------------
+pass:
+  flux: ["apprentissage"]   # « stages » existe mais est hors sujet ici
+  delai: 2.0
+  age_max_jours: 14
+
+# ------------------------------------------------------------
+#  adopte1dev (`main.py adopte1dev`)
+#  Job board 100 % développement, sous WordPress, API REST ouverte.
+#  `type_de_contrat` est une VRAIE taxonomie serveur : 43 alternances sur
+#  173 offres. Pas de mots-clés à régler — le site entier est dans la cible.
+#  L'identifiant du terme est résolu par son NOM à chaque run : un id
+#  WordPress change au moindre réimport, et la panne serait muette.
+# ------------------------------------------------------------
+adopte1dev:
+  contrats: ["Alternance"]
+  delai: 1.5
+  age_max_jours: 14
+
+# ------------------------------------------------------------
+#  DevITjobs.fr (`main.py devitjobs`)
+#  SPA React sans API ouverte, mais un flux RSS non paginé et non filtrable
+#  (`?keyword=`, `?contract=` testés, ignorés) qui rend TOUT le board avec
+#  description complète — 154 offres mesurées, une seule requête.
+#  Pas de type de contrat « alternance » côté site : ses seules catégories
+#  sont Freelance, Stage, Temps partiel, Plein temps. `classify.py` tranche
+#  sur le titre, et le rendement est bon malgré tout : 57 offres sur 154
+#  mesurées, la plupart republiées par des CFA (iscod) ou cabinets.
+# ------------------------------------------------------------
+devitjobs:
+  delai: 1.5
+  age_max_jours: 14
+
+# ------------------------------------------------------------
+#  WeLoveDevs (`main.py welovedevs`)
+#  Recherche Algolia derrière un relais maison (`search.welovedevs.com`),
+#  repéré sur le trafic réseau d'un Chrome piloté le temps d'un chargement.
+#  `contractTypes:apprenticeship` est un VRAI filtre serveur, comme Welcome
+#  to the Jungle : `contract_type` vient du site, jamais d'une déduction.
+#  Volume national mesuré : 1 à 2 offres. Faible, mais fiable — à ce niveau
+#  de trafic, chaque offre neuve vaut la requête.
+# ------------------------------------------------------------
+welovedevs:
+  contrats: ["apprenticeship"]
+  delai: 1.5
+  age_max_jours: 14
+
+# ------------------------------------------------------------
+#  Glassdoor (`main.py glassdoor`)
+#  Le site répond sans difficulté ; c'est son robots.txt qui borne le
+#  collecteur — pagination, /partner/ et /api/ sont interdits. D'où UNE
+#  page de 30 offres par mot-clé : la profondeur vient d'en avoir plusieurs.
+#
+#  Recouvrement mesuré : 18 titres sur 30 étaient déjà en base. Glassdoor
+#  agrège d'autres sites ; le dédoublonnage inter-sources absorbe le reste.
+# ------------------------------------------------------------
+glassdoor:
+  mots_cles:
+    - "alternance développeur"
+    - "alternance développeur web"
+    - "alternance développeur mobile"
+    - "alternance cloud"
+    - "alternance devops"
+    - "alternance ingénieur logiciel"
+    - "alternance informatique"
+    - "alternance cybersécurité"
+  lieu: "france"
+  delai: 5.0                # un timeout complet observé à cadence soutenue
+  age_max_jours: 14
+  # ZÉRO À DESSEIN. Les fiches /job-listing/ répondent 403 quelle que soit la
+  # cadence — vérifié sur session neuve, 4 fiches à 15 s d'intervalle, quand
+  # la recherche répond 200 juste avant et juste après. Le code de
+  # `completer()` reste en place : si Glassdoor rouvre, remonter ce nombre
+  # suffit. En attendant, marteler ce mur coûte 30 s par run pour rien.
+  max_details_par_run: 0
+
+# ------------------------------------------------------------
+#  La Bonne Alternance (collecteur séparé : `main.py lba`)
+#  Seule source du MARCHÉ CACHÉ : le bloc `recruiters` de la réponse liste
+#  des entreprises recrutant en alternance SANS offre publiée, avec un
+#  contact direct. Nécessite une clé : compte gratuit sur
+#  https://api.apprentissage.beta.gouv.fr, puis $env:LBA_API_KEY = "..."
+#  Usage non lucratif uniquement — une recherche personnelle entre dans ce cadre.
+# ------------------------------------------------------------
+lba:
+  # Codes ROME. M1805 est LE code du développement informatique ; les deux
+  # autres couvrent l'exploitation/cloud et le support SI. L'API renvoie un
+  # bloc `warnings` qui signalera tout code invalide — à surveiller au 1er run.
+  romes:
+    - M1805   # Études et développement informatique
+    - M1810   # Production et exploitation de systèmes d'information
+    - M1802   # Expertise et support en systèmes d'information
+
+  # L'API raisonne en rayon autour d'un point : couvrir la France impose de
+  # balayer les bassins. Réduire cette liste si le quota d'API se révèle serré
+  # (nombre de requêtes = bassins x romes x niveaux).
+  bassins:
+    - {nom: "Paris",             lat: 48.8566, lon: 2.3522,  rayon: 100}
+    - {nom: "Lyon",              lat: 45.7640, lon: 4.8357,  rayon: 100}
+    - {nom: "Marseille",         lat: 43.2965, lon: 5.3698,  rayon: 100}
+    - {nom: "Toulouse",          lat: 43.6047, lon: 1.4442,  rayon: 100}
+    - {nom: "Nantes",            lat: 47.2184, lon: -1.5536, rayon: 100}
+    - {nom: "Bordeaux",          lat: 44.8378, lon: -0.5792, rayon: 100}
+    - {nom: "Lille",             lat: 50.6292, lon: 3.0573,  rayon: 100}
+    - {nom: "Rennes",            lat: 48.1173, lon: -1.6778, rayon: 100}
+    - {nom: "Strasbourg",        lat: 48.5734, lon: 7.7521,  rayon: 100}
+    - {nom: "Montpellier",       lat: 43.6108, lon: 3.8767,  rayon: 100}
+    - {nom: "Nice",              lat: 43.7102, lon: 7.2620,  rayon: 100}
+    - {nom: "Grenoble",          lat: 45.1885, lon: 5.7245,  rayon: 100}
+    - {nom: "Rouen",             lat: 49.4432, lon: 1.0993,  rayon: 100}
+    - {nom: "Nancy",             lat: 48.6921, lon: 6.1844,  rayon: 100}
+    - {nom: "Clermont-Ferrand",  lat: 45.7772, lon: 3.0870,  rayon: 100}
+
+  # Niveaux européens : 6 = Bac+3/4, 7 = Bac+5. Le MSc mène au 7, mais l'entrée
+  # se fait à Bac+4 — les deux sont pertinents.
+  niveaux: ["6", "7"]
+  # Quota mesuré : 60 requêtes / 60 s. Un délai de 1,0 tomberait pile sur la
+  # limite — 1,2 laisse de la marge sans ralentir sensiblement.
+  delai: 1.2
+
+# ------------------------------------------------------------
+#  Posts du fil LinkedIn (collecteur séparé : `main.py posts`)
+#  Nécessite une session — voir collectors/linkedin_posts.py.
+#  Ici on cherche des tournures de RECRUTEUR, pas des intitulés d'offre :
+#  c'est ce qui distingue « une boîte qui cherche » d'« un candidat qui
+#  publie son CV ».
+# ------------------------------------------------------------
+posts:
+  # ORDRE IMPORTANT : seuls les `max_recherches_par_run` premiers sont lancés.
+  #
+  # Les requêtes LARGES d'abord. La version initiale privilégiait les
+  # formulations de recruteur (« recherche alternant développeur ») pour
+  # éviter les posts de candidats — mais LinkedIn les interprète assez
+  # littéralement et elles ne ramenaient rien. « alternance développeur »,
+  # mesuré, remonte 11 posts exploitables pour 19 candidats écartés.
+  # Le discriminateur de `linkedin_posts.py` faisant ce tri à 11/11,
+  # ratisser large et filtrer ensuite est nettement plus rentable.
+  mots_cles:
+    - "alternance développeur"          # mesuré : 11 retenus, 19 candidats écartés
+    - "alternance développeur web"
+    - "alternance devops cloud"
+    - "alternance développeur mobile"
+    - "alternance ingénieur logiciel"
+    # Formulations plus étroites, en réserve : peu ou pas de résultats
+    # constatés, gardées au cas où LinkedIn changerait son moteur.
+    - "recherche alternant développeur"
+    - "recrute développeur alternance"
+    - "offre alternance développeur 2026"
+    - "#alternance #developpeurweb"
+    - "#alternance #fullstackdeveloper"
+
+  # Comptes qui publient régulièrement des offres d'alternance.
+  # Bien plus sûr qu'une recherche : une page consultée, aucune requête au
+  # moteur de contenu — or c'est l'accumulation de recherches qui fait couper.
+  # Ils sont donc relevés EN PREMIER, avant les mots-clés.
+  # Format : "company/<slug>" ou "in/<slug>", tels qu'ils apparaissent dans
+  # l'URL LinkedIn. Ajoute ceux que tu repères dans le digest.
+  comptes_suivis:
+    - "company/adopteundev"   # une offre d'alternance par jour ouvré
+
+  fenetre: "past-month"     # past-24h | past-week | past-month
+  age_max_jours: 14         # filtrage après coup sur la date affichée
+  defilements: 6            # volontairement bas : un scroll infini se repère
+  delai: 4.0                # secondes entre deux actions
+
+  # GARDE-FOUS — appris à la dure le 13/08/2026. Quatre collectes en vingt
+  # minutes ont suffi à ce que LinkedIn coupe la recherche de contenu :
+  # résultats vides, sans erreur ni message, pendant plusieurs heures. La
+  # session restait valide, le compte intact — mais l'outil inutilisable.
+  heures_entre_runs: 6      # délai minimum entre deux collectes (--force outrepasse)
+  max_recherches_par_run: 5 # c'est leur accumulation qui déclenche la coupure
+
+# ------------------------------------------------------------
+#  Digest
+# ------------------------------------------------------------
+rapport:
+  # Le marché caché compte des milliers d'entreprises : affichées sans
+  # limite, elles noient les vraies offres. On n'en garde que la tête —
+  # celles dont le code NAF confirme une activité informatique (bonus de
+  # 25 points), ce qui suppose un score d'au moins 45.
+  marche_cache_limite: 40
+  marche_cache_score_min: 45
+
+# ------------------------------------------------------------
+#  Exclusions sectorielles
+#
+#  Différent d'un malus : ces offres ne sont PAS déclassées, elles
+#  DISPARAISSENT du digest. Le motif est stocké en base, la ligne n'est jamais
+#  supprimée — retirer un secteur ci-dessous puis lancer `rescore` les fait
+#  toutes revenir.
+#
+#  Le filtre porte sur le CHAMP ENTREPRISE et le CODE NAF, jamais sur le texte
+#  de l'offre : une annonce de développeur qui cite « secteur bancaire » parmi
+#  ses clients n'est pas une offre de banque.
+# ------------------------------------------------------------
+exclusions:
+  secteurs:
+    banque: ["banque", "banques", "bancaire", "bnp", "paribas",
+             "societe generale", "credit agricole", "credit mutuel",
+             "credit lyonnais", "lcl", "bpce", "banque populaire",
+             "caisse d epargne", "boursobank", "boursorama", "fortuneo",
+             "hello bank", "monabanq", "la banque postale", "cic", "natixis",
+             "hsbc", "oddo", "lazard", "rothschild", "amundi", "euronext",
+             "caisse des depots", "bred", "arkea", "milleis", "qonto",
+             # Filiales informatiques de groupes bancaires : le nom ne dit pas
+             # « banque », le métier reste le SI d'une banque. Euro-Information
+             # (Crédit Mutuel) pesait 24 offres, CA-SILCA (Crédit Agricole) 5.
+             "euro information", "euro-information", "silca", "ca silca",
+             "idia", "sopra banking", "cofidis", "franfinance", "younited"]
+
+    assurance: ["assurance", "assurances", "assureur", "insurance",
+                "mutuelle", "mutuelles", "prevoyance", "reassurance",
+                "axa", "allianz", "generali", "aviva", "swiss life", "cnp",
+                "maif", "macif", "maaf", "matmut", "gmf", "mma", "groupama",
+                "covea", "harmonie mutuelle", "malakoff", "humanis", "ag2r",
+                "klesia", "apicil", "april", "verspieren", "gan", "abeille",
+                "scor", "wakam"]
+
+    # Écoles et CFA. Ils publient pour recruter LEURS étudiants, ce qui
+    # suppose de s'inscrire chez eux — Ilyés a déjà SUPINFO. C'était un malus
+    # de -45 : les offres restaient visibles, simplement plus bas. Désormais
+    # une exclusion franche.
+    ecoles: ["cfa", "epsi", "ecole", "ecoles", "school", "campus", "sup de",
+             "studi", "iscod", "esgi", "ipi", "ifag", "academy", "institut",
+             "universite", "formation", "formations", "digital school",
+             "mydigitalschool", "openclassrooms", "wild code school", "cesi",
+             "greta", "afpa", "eni", "ynov", "efrei", "iscom", "ismac",
+             "esiee", "aftec", "igensia", "ascencia", "ipssi", "epitech",
+             "hetic", "supdevinci", "need for school", "nexa", "ironhack",
+             "cci", "alternance formation", "centre de formation",
+             # Les noms soudés échappent aux frontières de mot : « campus » ne
+             # matche pas dans « LiveCampus », « school » pas dans « Kaischool ».
+             # Ces écoles-là doivent être nommées en toutes lettres.
+             "livecampus", "kaischool",
+             # Constatées dans le digest, aucun mot-clé dans leur raison
+             # sociale. AURLOM pesait à lui seul 57 offres en base.
+             "aurlom", "scholia", "wijin", "eduservices",
+             "education", "educative", "educatif", "esg montpellier",
+             # « galileo » tout court écartait GALILEO NETWORK, éditeur de
+             # logiciels de 3-5 personnes (NAF 5829C) — même erreur que
+             # « dassault » qui emportait Dassault Systèmes. Nom complet.
+             "galileo global education"]
+
+    # « dassault » tout court écartait aussi Dassault Systèmes, éditeur de
+    # logiciels (CATIA, SOLIDWORKS) et non armurier. Le motif est restreint à
+    # l'avionneur militaire pour garder les offres de Dassault Systèmes.
+    armement: ["armement", "armements", "defense", "defence", "militaire",
+               "thales", "naval group", "dcns", "mbda", "nexter", "knds",
+               "arquus", "dga", "direction generale de l armement", "safran",
+               "arianegroup", "eurenco", "roxel", "cnim", "chemring",
+               "rheinmetall", "leonardo", "bae systems", "lockheed",
+               "raytheon", "northrop", "general dynamics", "dassault aviation",
+               "gendarmerie", "ministere des armees", "armee de terre",
+               "armee de l air", "marine nationale", "legion etrangere"]
+
+  # Métiers écartés — testés sur l'INTITULÉ SEUL.
+  # « Data Engineer » ou « Data Scientist » en titre : c'est le poste, on jette.
+  # Un poste de développeur dont la description cite pandas ou du machine
+  # learning : c'est un outil, on garde. D'où le test sur le titre seulement.
+  metiers:
+    data_ml:
+      poids_exclusion: true
+      motifs: ["data engineer", "dataengineer", "data scientist", "datascientist",
+               "data analyst", "data analytics", "data science", "data steward",
+               "data manager", "data quality", "data governance", "dataviz",
+               "ingenieur data", "ingenieur donnees", "analyste de donnees",
+               "big data", "business intelligence", "bi", "analytics",
+               "machine learning", "ml engineer", "mlops", "deep learning",
+               "nlp engineer", "statisticien", "actuaire", "datamining"]
+
+    # Ressources humaines. « Développement RH » gagnait même +20 « poste
+    # technique » à cause du mot « développement ».
+    rh:
+      motifs: ["rh", "ressources humaines", "developpement rh", "sirh",
+               "recrutement", "recruteur", "recruteuse", "talent acquisition",
+               "paie", "paye", "formation professionnelle", "people",
+               "gestion des carrieres", "relations sociales"]
+
+    # Électronique et embarqué. C'est du logiciel, mais un autre monde que
+    # le MSc Cloud & Mobile — retire cette entrée si tu changes d'avis.
+    electronique:
+      motifs: ["electronique", "embarque", "embarquee", "embarques", "ivv",
+               "hardware", "fpga", "vhdl", "pcb", "carte electronique",
+               "mecatronique", "electrotechnique", "automatisme",
+               "automaticien", "cablage", "cao electronique", "rf", "antenne"]
+
+    # Fonctions support et métiers d'analyse fonctionnelle.
+    fonctionnel:
+      motifs: ["business analyst", "analyste fonctionnel", "moa",
+               "industrialisation", "packaging", "methodes", "qhse",
+               "amelioration continue", "supply", "achat", "achats",
+               "controle de gestion", "comptabilite", "juridique", "fiscal",
+               "management", "transformation digitale", "gestionnaire"]
+
+  # Types de contrat écartés — testés sur l'intitulé et sur les mentions
+  # EXPLICITES de contrat, jamais sur le simple mot « CDI » dans le texte :
+  # « possibilité de CDI à l'issue de l'alternance » est un argument de vente,
+  # pas un type de contrat.
+  contrats:
+    exclus: ["cdi", "contrat a duree indeterminee", "freelance", "independant",
+             "portage salarial", "interim", "consultant independant",
+             "service civique", "volontariat", "vie", "vsi", "benevolat"]
+
+  # Contre-exemples — prioritaires sur toute exclusion ci-dessus.
+  # Toute liste sectorielle produit des faux positifs ; c'est ici qu'on les
+  # rattrape, plutôt qu'en mutilant les motifs.
+  # Offres COURTÉES par une école : elle ne recrute pas pour elle-même mais
+  # « pour l'une de ses entreprises partenaires », ce qui suppose de s'inscrire
+  # chez elle. Les deux familles sont exigées ENSEMBLE dans l'en-tête : une
+  # entreprise qui parle de « ses campus » sans courtage n'est pas touchée.
+  courtage_ecole:
+    marqueurs_ecole:
+      - "cfa"
+      - "ecole"
+      - "ecoles"
+      - "centre de formation"
+      - "organisme de formation"
+      - "etablissement d enseignement"
+      - "nos etudiants"
+      - "nos apprenants"
+      - "bts+"
+      - "ecole superieure"
+    marqueurs_courtage:
+      - "entreprise partenaire"
+      - "entreprises partenaires"
+      - "entreprise collaboratrice"
+      - "entreprises collaboratrices"
+      - "pour l un de nos partenaires"
+      - "pour l une de nos entreprises"
+      - "pour l un de ses partenaires"
+      - "pour l une de ses entreprises"
+      - "pour le compte de l une de"
+      - "nos entreprises partenaires"
+
+  exceptions:
+    - "banques alimentaires"    # association caritative, pas un établissement bancaire
+    - "banque alimentaire"
+    # « cegedim » a été RETIRÉ des exceptions. Je l'y avais mis en jugeant
+    # qu'un éditeur de logiciels pour assureurs n'est pas un assureur — c'était
+    # mon critère, pas celui d'Ilyés, qui ne postule pas dans l'assurance.
+    # « Cegedim Assurances » sort donc ; « Cegedim Santé » reste, faute de
+    # mot-clé assurantiel dans son nom.
+    - "assurance maladie"       # organisme public de santé
+    - "cnam"
+    - "assurance retraite"
+    - "carsat"
+
+  # Préfixes de code NAF (fournis par La Bonne Alternance uniquement).
+  # 64 = services financiers · 65 = assurance · 66 = auxiliaires finance/assurance
+  # 2540 = fabrication d'armes et de munitions
+  naf_exclus: ["64", "65", "66", "2540"]
+
+# ------------------------------------------------------------
+#  Scoring — poids par technologie présente dans l'offre
+#  Calibré sur le CV ET sur la spécialité du MSc (Cloud & Mobile).
+# ------------------------------------------------------------
+scoring:
+  competences:
+    # Spécialité du master — pèse le plus lourd
+    cloud:        {poids: 12, motifs: ["cloud", "aws", "azure", "gcp", "google cloud", "terraform", "kubernetes", "k8s", "serverless", "cloud native", "iac", "ansible", "scaleway", "openstack", "helm"]}
+    mobile:       {poids: 12, motifs: ["mobile", "flutter", "dart", "android", "ios", "react native", "kotlin", "swift", "application mobile", "jetpack compose"]}
+
+    # Différenciants du CV — peu d'alternants savent faire ça
+    devops_ci:    {poids: 9,  motifs: ["devops", "docker", "ci cd", "cicd", "jenkins", "gitlab ci", "github actions", "conteneur", "microservice", "observabilite", "monitoring", "sre"]}
+    tests_qualite: {poids: 8, motifs: ["playwright", "selenium", "appium", "tdd", "test driven", "tests end to end", "e2e", "tests d integration", "qualite logicielle", "qa", "pytest", "junit"]}
+
+    # Cœur de stack
+    python:       {poids: 9,  motifs: ["python", "fastapi", "pydantic", "sqlalchemy", "django", "flask"]}
+    csharp:       {poids: 8,  motifs: ["c#", "csharp", ".net", "dotnet", "asp.net", "blazor", "maui"]}
+    java:         {poids: 7,  motifs: ["java", "spring", "spring boot", "servlet"]}
+    typescript:   {poids: 7,  motifs: ["typescript", "javascript", "node.js", "nodejs", "deno"]}
+
+    archi:        {poids: 6,  motifs: ["clean architecture", "solid", "design pattern", "hexagonale", "ddd", "refactoring", "code review"]}
+    # Poids abaissé de 6 à 2 : les postes DATA/ML sont désormais exclus
+    # (voir `exclusions.metiers`). Ces motifs ne servent donc plus qu'à
+    # valoriser un poste de DÉVELOPPEUR qui touche à l'IA — profil ISO-K —
+    # sans faire remonter les offres d'analyse de données.
+    ia_data:      {poids: 2,  motifs: ["machine learning", "scikit learn", "sklearn", "pandas", "numpy", "intelligence artificielle", "ia", "llm", "rag", "nlp", "recommandation"]}
+
+    # Solide mais moins différenciant
+    bdd:          {poids: 4,  motifs: ["postgresql", "postgres", "mysql", "mongodb", "redis", "sqlite", "sql"]}
+    api:          {poids: 4,  motifs: ["api rest", "rest api", "restful", "graphql", "grpc"]}
+    web_front:    {poids: 3,  motifs: ["react", "vue", "angular", "tailwind", "next.js", "svelte"]}
+    php:          {poids: 2,  motifs: ["php", "symfony", "laravel"]}
+
+  # Gate métier — appliqué à l'INTITULÉ SEUL, jamais à la description.
+  # Sans lui, un « Chargé de marketing digital » citant Data, IT et cloud
+  # dans son descriptif passe devant un vrai poste de développement : les
+  # poids ci-dessus mesurent la densité technique du texte, pas la nature
+  # du poste. C'est le titre qui dit ce qu'on va réellement faire.
+  titre:
+    cible:
+      poids: 20
+      motifs: ["developpeur", "developpeuse", "developpement", "dev", "devops", "sre",
+               "ingenieur logiciel", "software", "engineer", "programmeur", "architecte",
+               "fullstack", "full stack", "backend", "back end", "frontend", "front end",
+               "cloud", "kubernetes", "intelligence artificielle", "ia",
+               "mobile", "android", "ios", "flutter", "web", "informatique", "logiciel"]
+    hors_cible:
+      poids: -35
+      motifs: ["charge de", "chargee de", "assistant", "assistante", "conseiller",
+               "conseillere", "commercial", "commerciale", "marketing", "communication",
+               "ressources humaines", "supply chain", "achats", "juridique", "finance",
+               "comptable", "vente", "business manager", "business developer",
+               "consultant fonctionnel", "graphiste", "ux designer", "ui designer",
+               "community manager", "audit", "logistique", "technicien",
+               "chef de projet", "product owner", "product manager",
+               # « Développeur foncier » / « développeur immobilier » : le mot
+               # existe hors informatique, et le gate ci-dessus le prendrait
+               # pour un poste technique.
+               "foncier", "fonciere", "immobilier", "immobiliere"]
+
+  # Le gate écoles vivait ici en malus (-45) : les offres restaient visibles,
+  # simplement plus bas. Il est devenu une exclusion franche, dans
+  # `exclusions.secteurs.ecoles` — elles ne s'affichent plus du tout.
+
+  bonus:
+    - {points: 12, motifs: ["3 semaines", "3 sem", "rythme 3 1"],                   libelle: "rythme 3/1 compatible"}
+    # Le MSc dure 2 ans : un contrat de 2 ans couvre tout le cursus, c'est
+    # exactement ce que cherchent les entreprises qui recrutent en alternance.
+    - {points: 10, motifs: ["2 ans", "24 mois", "sur 2 ans", "deux ans"],           libelle: "contrat 2 ans (MSc complet)"}
+    - {points: 8,  motifs: ["bac+4", "bac +4", "m1", "master 1", "1ere annee de master", "preparant un bac+5", "cycle master"], libelle: "niveau M1 / Bac+4"}
+    - {points: 6,  motifs: ["teletravail", "remote", "hybride", "full remote"],     libelle: "télétravail"}
+    - {points: 6,  motifs: ["r d", "recherche et developpement", "innovation"],     libelle: "R&D"}
+    - {points: 5,  motifs: ["septembre 2026", "rentree 2026", "09 2026", "sept 2026"], libelle: "démarrage sept. 2026"}
+    # Code NAF de l'entreprise (fourni par La Bonne Alternance). Pour une
+    # entreprise du marché caché, qui n'a aucune description de poste, c'est
+    # le SEUL signal disponible sur son métier réel — d'où le poids élevé.
+    - {points: 25, motifs: ["programmation informatique", "edition de logiciels",
+                            "conseil en systemes et logiciels", "tierce maintenance",
+                            "gestion d installations informatiques",
+                            "autres activites informatiques", "traitement de donnees",
+                            "portails internet", "hebergement et activites connexes",
+                            "ingenierie etudes techniques"],
+       libelle: "secteur informatique (NAF)"}
+
+  malus:
+    # ATTENTION : « Bac+5 » seul veut souvent dire « PRÉPARANT un Bac+5 »,
+    # ce qui correspond au profil. On ne pénalise que le diplôme déjà obtenu.
+    - {points: -25, motifs: ["bac+5 valide", "bac+5 obtenu", "m2 uniquement", "diplome bac+5 requis", "deja diplome"], libelle: "Bac+5 déjà validé exigé"}
+    - {points: -20, motifs: ["3 ans d experience", "5 ans d experience", "experience confirmee", "senior", "profil confirme", "lead"], libelle: "expérience senior"}
+    - {points: -15, motifs: ["1 semaine 1 semaine", "1 sem 1 sem", "rythme 1 1", "2 jours 3 jours"], libelle: "rythme incompatible"}
+    # SUPPRIMÉ — un malus « hors cible métier » portant sur tout le texte
+    # ("commercial", "marketing", "vente", "recrutement", "comptabilite").
+    # Il était à la fois redondant et nuisible : ces mots figurent déjà dans
+    # `scoring.titre.hors_cible`, où ils sont testés sur le seul intitulé,
+    # et appliqués à la description ils frappaient de bonnes offres — un post
+    # de recruteur pénalisé pour avoir écrit « recrutement », une offre de
+    # dev e-commerce pour « plateforme de vente », une offre citant son
+    # « processus de recrutement ». La nature du poste se lit dans son titre,
+    # pas dans le vocabulaire de sa description.

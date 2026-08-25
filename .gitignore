@@ -1,0 +1,22 @@
+# Environnement
+.venv/
+__pycache__/
+*.pyc
+
+# Profil Chrome dédié au collecteur de posts — contient les cookies de session
+# LinkedIn. À ne JAMAIS versionner.
+.chrome-profile/
+
+# Secrets
+.env
+*.key
+
+# Config perso — coordonnées, CV/lettre, identifiants de candidature.
+# Copie config.example.yaml en config.yaml et personnalise.
+config.yaml
+
+# Données collectées
+store/jobs.db
+store/jobs.db-*
+store/raw/
+digest.html
