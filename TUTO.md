@@ -502,15 +502,26 @@ ce paragraphe.
 ```
 
 Marche pour N'IMPORTE QUEL lien, pas seulement les sites déjà couverts par
-le radar — la seule condition est que la page expose un balisage
-`JobPosting` (schema.org), ce que la plupart des sites d'emploi publient
-pour le référencement, JavaScript ou pas. Sans ce balisage, le programme le
-dit clairement plutôt que de deviner un titre ou une description :
+le radar. Deux niveaux :
 
-```
-aucune donnée structurée JobPosting sur https://... — ce site
-n'est pas exploitable par cette voie
-```
+1. Balisage `JobPosting` (schema.org), que la plupart des sites d'emploi
+   publient pour le référencement — le plus fiable, titre/entreprise/lieu
+   déclarés par le site lui-même ;
+2. à défaut, titre de la page et texte visible une fois la navigation
+   écartée — moins précis (l'entreprise, en particulier, reste vide plutôt
+   que devinée), le programme le signale à chaque fois :
+
+   ```
+   aucune donnée structurée JobPosting sur https://... — repli sur le
+   titre et le texte visible de la page, moins fiable : vérifie le résultat
+   ```
+
+**indeed.com est exclu des deux**, pas seulement de `postuler` (voir
+ci-dessus) : constaté sur ce projet, la même URL `viewjob` a renvoyé deux
+entreprises différentes à quelques minutes d'écart, sans rien qui le
+signale dans la réponse. Une donnée fausse qui a l'air correcte est pire
+qu'un échec franc — l'extraction est refusée plutôt que risquer un CV bâti
+sur la mauvaise offre.
 
 L'offre récupérée passe par le même calcul de tags que toutes les autres —
 rien n'est ajouté à ta base, c'est un aller simple pour un CV.
