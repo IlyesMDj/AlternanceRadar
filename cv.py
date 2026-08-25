@@ -471,7 +471,14 @@ def generer(tags_offre: list[str], cv_data: dict, cfg: dict, dossier: Path,
     """
     libelles = (cfg.get("candidature") or {}).get("libelles_technos", {})
     adapte = adapter(cv_data, tags_offre)
-    accroche = generer_accroche(cfg.get("profil", {}), tags_offre, libelles,
+    # Seuls les tags qui recoupent un groupe RÉELLEMENT rempli peuvent
+    # nourrir l'accroche : un tag matché sur un groupe vide (ex. « cloud »
+    # sans compétence listée) donnerait à Gemini une compétence à affirmer
+    # qui n'apparaît nulle part ailleurs dans le CV — contradiction visible
+    # entre l'accroche et la section Compétences juste en dessous.
+    groupes_remplis = {nom for nom, _ in adapte["competences"]}
+    tags_reels = [t for t in tags_offre if t in groupes_remplis]
+    accroche = generer_accroche(cfg.get("profil", {}), tags_reels, libelles,
                                 job_titre, job_entreprise, job_description)
     source = rendre(adapte, libelles, accroche)
     nom_base = "cv"
