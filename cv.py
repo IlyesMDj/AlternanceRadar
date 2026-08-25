@@ -294,6 +294,11 @@ _GABARIT = r"""\documentclass[10.5pt,a4paper]{article}
 \usepackage{titlesec}
 \usepackage{hyperref}
 \usepackage{xcolor}
+% TeX Gyre Heros (clone libre d'Helvetica) plutôt que le Computer Modern par
+% défaut de LaTeX — sans lui un CV a immédiatement l'air d'un article
+% académique des années 90.
+\usepackage{tgheros}
+\renewcommand{\familydefault}{\sfdefault}
 
 \pagestyle{empty}
 \setlength{\parindent}{0pt}
