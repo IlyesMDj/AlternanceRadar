@@ -1331,19 +1331,24 @@ def cmd_cv(args, cfg: dict, store: Store) -> None:
     """Génère un CV LaTeX (et son PDF si possible) adapté à une offre.
 
     Le contenu ne change jamais : `cv.py` réordonne `cv_source.yaml` selon
-    les tags déjà calculés pour l'offre — il n'invente ni ne reformule rien,
-    et sans LLM.
+    les tags de l'offre — il n'invente ni ne reformule rien (à l'exception
+    de l'accroche, optionnelle, voir `cv.py`).
+
+    Accepte un `uid`, un bout de nom, OU un lien direct — y compris vers une
+    offre jamais collectée. Dans ce dernier cas, `cv.depuis_url` la récupère
+    à la volée par son balisage `JobPosting` (schema.org), et elle passe par
+    le MÊME pipeline de classification/score que n'importe quel collecteur,
+    pour des tags comparables à ceux d'une offre déjà en base.
     """
     import hashlib
     import json
 
     import cv as cvgen
 
-    trouves = store.resoudre(args.uid)
-    if not trouves:
-        log.error("aucune offre ne correspond à « %s »", args.uid)
-        return
-    if len(trouves) > 1:
+    terme = args.uid.strip()
+    trouves = store.resoudre(terme)
+
+    if trouves and len(trouves) > 1:
         print(f"\n  {len(trouves)} offres correspondent — précise :\n")
         for o in trouves[:10]:
             print(f"    {o['uid']:<28} {(o['title'] or '')[:44]:<44} "
@@ -1351,7 +1356,28 @@ def cmd_cv(args, cfg: dict, store: Store) -> None:
         print()
         return
 
-    job = trouves[0]
+    if trouves:
+        row = trouves[0]
+        titre, entreprise, description = row["title"], row["company"], row["description"]
+        tags = json.loads(row["tags"] or "[]")
+        # Un hash court, jamais l'uid brut : certaines sources (DevITjobs...)
+        # portent l'URL entière en guise d'external_id, pleine de « / » qui
+        # créeraient une arborescence de dossiers au lieu d'un seul.
+        identifiant = hashlib.sha1(row["uid"].encode()).hexdigest()[:16]
+    elif terme.startswith(("http://", "https://")):
+        job_brut = cvgen.depuis_url(terme)
+        if not job_brut:
+            log.error("impossible d'extraire l'offre depuis %s — voir le "
+                      "message ci-dessus", terme)
+            return
+        job_note = pipeline(cfg)(job_brut)
+        titre, entreprise, description = job_note.title, job_note.company, job_note.description
+        tags = job_note.tags
+        identifiant = hashlib.sha1(terme.encode()).hexdigest()[:16]
+    else:
+        log.error("aucune offre ne correspond à « %s »", terme)
+        return
+
     chemin_source = RACINE / "cv_source.yaml"
     if not chemin_source.exists():
         log.error("cv_source.yaml introuvable — copie cv_source.example.yaml "
@@ -1359,20 +1385,15 @@ def cmd_cv(args, cfg: dict, store: Store) -> None:
         return
 
     cv_data = cvgen.charger(chemin_source)
-    tags = json.loads(job["tags"] or "[]")
-    # Un hash court, jamais l'uid brut : certaines sources (DevITjobs...)
-    # portent l'URL entière en guise d'external_id, pleine de « / » qui
-    # créeraient une arborescence de dossiers au lieu d'un seul.
-    identifiant = hashlib.sha1(job["uid"].encode()).hexdigest()[:16]
     dossier = RACINE / "store" / "cv" / identifiant
     chemin_tex, chemin_pdf = cvgen.generer(
         tags, cv_data, cfg, dossier,
-        job_titre=job["title"] or "", job_entreprise=job["company"] or "",
-        job_description=job["description"] or "",
+        job_titre=titre or "", job_entreprise=entreprise or "",
+        job_description=description or "",
     )
 
-    print(f"\n  {job['title']}")
-    print(f"  {job['company']} · {job['location']}")
+    print(f"\n  {titre}")
+    print(f"  {entreprise}")
     print(f"  tags retenus : {', '.join(tags) or '(aucun)'}\n")
     print(f"  .tex : {chemin_tex}")
     if chemin_pdf:
@@ -1609,8 +1630,9 @@ def main() -> None:
     po.set_defaults(fn=cmd_postuler)
 
     cv = sub.add_parser("cv", help="génère un CV LaTeX adapté à une offre "
-                                   "(cv_source.yaml réordonné, sans LLM)")
-    cv.add_argument("uid", help="identifiant de l'offre, ou un bout de son nom")
+                                   "(uid, bout de nom, ou lien direct)")
+    cv.add_argument("uid", help="identifiant de l'offre, un bout de son nom, "
+                                "ou l'URL de l'offre (collectée ou non)")
     cv.set_defaults(fn=cmd_cv)
 
     ct = sub.add_parser("contacts", help="les pistes joignables directement : "

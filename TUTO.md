@@ -495,6 +495,26 @@ seuls faits fournis (formation, rythme, compétences qui recoupent l'offre).
 Sans la clé, ou si l'appel échoue, le CV se génère normalement, juste sans
 ce paragraphe.
 
+### Offre jamais collectée : coller directement le lien
+
+```powershell
+.\radar.ps1 cv https://www.jobteaser.com/fr/job-offers/...
+```
+
+Marche pour N'IMPORTE QUEL lien, pas seulement les sites déjà couverts par
+le radar — la seule condition est que la page expose un balisage
+`JobPosting` (schema.org), ce que la plupart des sites d'emploi publient
+pour le référencement, JavaScript ou pas. Sans ce balisage, le programme le
+dit clairement plutôt que de deviner un titre ou une description :
+
+```
+aucune donnée structurée JobPosting sur https://... — ce site
+n'est pas exploitable par cette voie
+```
+
+L'offre récupérée passe par le même calcul de tags que toutes les autres —
+rien n'est ajouté à ta base, c'est un aller simple pour un CV.
+
 ---
 
 ## 9. Toutes les commandes

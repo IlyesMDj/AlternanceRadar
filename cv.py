@@ -15,6 +15,12 @@ Seule exception au « sans LLM » : le paragraphe d'accroche en tête du CV,
 projet) à partir des SEULS faits fournis — formation, rythme, compétences
 qui recoupent l'offre. Optionnel : sans clé, ou si l'appel échoue, le CV se
 génère normalement, juste sans ce paragraphe.
+
+`depuis_url()` étend tout ça à une offre jamais collectée : n'importe quel
+lien exposant un balisage `JobPosting` (schema.org), qu'elle vienne d'une
+des sources déjà couvertes ou d'un site totalement inconnu du projet. Elle
+passe ensuite par le pipeline habituel (`main.pipeline`) pour des tags
+comparables à ceux d'une offre déjà en base — aucune classification ad hoc.
 """
 
 from __future__ import annotations
@@ -45,6 +51,94 @@ def _e(texte: str | None) -> str:
 
 def charger(chemin: Path) -> dict:
     return yaml.safe_load(chemin.read_text(encoding="utf-8")) or {}
+
+
+def _candidats_jsonld(donnee):
+    """Aplati un bloc JSON-LD — liste, objet seul, ou `@graph` imbriqué —
+    en objets candidats à filtrer sur `@type == "JobPosting"`."""
+    if isinstance(donnee, list):
+        for item in donnee:
+            yield from _candidats_jsonld(item)
+    elif isinstance(donnee, dict):
+        if "@graph" in donnee:
+            yield from _candidats_jsonld(donnee["@graph"])
+        else:
+            yield donnee
+
+
+def depuis_url(url: str):
+    """Récupère une offre depuis N'IMPORTE QUELLE URL exposant un balisage
+    `JobPosting` (schema.org) — le standard que la quasi-totalité des sites
+    d'emploi publient pour le référencement, y compris ceux qui rendent le
+    reste de la page côté client (React, Next.js...). C'est ce balisage,
+    pas le HTML visible, qui rend cette fonction générique.
+
+    Sans lui, retourne None plutôt que de deviner un titre ou une
+    description depuis le texte brut de la page — la source de vérité du CV
+    reste `cv_source.yaml`, jamais une extraction approximative.
+
+    Renvoie un `Job` NON scoré : c'est à l'appelant de le faire passer par
+    le pipeline habituel (`classify` + `score`) pour obtenir des tags
+    comparables à ceux d'une offre déjà en base.
+    """
+    import json as _json
+
+    from bs4 import BeautifulSoup
+    from curl_cffi import requests as cffi
+
+    from core.models import Job
+
+    session = cffi.Session(impersonate="chrome124", timeout=30)
+    try:
+        r = session.get(url, headers={"Accept-Language": "fr-FR,fr;q=0.9"})
+    except Exception as e:
+        log.error("échec réseau sur %s : %s", url, e)
+        return None
+    finally:
+        session.close()
+
+    if r.status_code != 200:
+        log.error("HTTP %s sur %s", r.status_code, url)
+        return None
+
+    soup = BeautifulSoup(r.text, "lxml")
+    offre = None
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            donnee = _json.loads(script.get_text() or "")
+        except ValueError:
+            continue
+        for candidat in _candidats_jsonld(donnee):
+            if candidat.get("@type") == "JobPosting":
+                offre = candidat
+                break
+        if offre:
+            break
+
+    if not offre:
+        log.warning("aucune donnée structurée JobPosting sur %s — ce site "
+                    "n'est pas exploitable par cette voie", url)
+        return None
+
+    titre = (offre.get("title") or "").strip()
+    organisation = offre.get("hiringOrganization")
+    entreprise = ((organisation.get("name") if isinstance(organisation, dict)
+                  else organisation) or "").strip()
+    description = BeautifulSoup(offre.get("description") or "", "lxml") \
+        .get_text("\n", strip=True)
+
+    lieu = offre.get("jobLocation")
+    lieu = lieu[0] if isinstance(lieu, list) and lieu else lieu
+    adresse = lieu.get("address") if isinstance(lieu, dict) else None
+    ville = (adresse.get("addressLocality") or adresse.get("addressRegion") or "") \
+        if isinstance(adresse, dict) else ""
+
+    if not (titre and description):
+        log.warning("JobPosting incomplet sur %s (titre ou description manquant)", url)
+        return None
+
+    return Job(source="url", external_id=url, title=titre, company=entreprise,
+              location=ville, url=url, description=description)
 
 
 def _pertinence(tags: list[str] | None, cibles: set[str]) -> int:

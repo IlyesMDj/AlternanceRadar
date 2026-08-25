@@ -161,20 +161,36 @@ class Store:
         return cur.rowcount
 
     def resoudre(self, terme: str, limite: int = 12) -> list[sqlite3.Row]:
-        """Retrouve une offre par identifiant exact, ou par fragment de texte.
+        """Retrouve une offre par identifiant exact, par URL, ou par fragment
+        de texte.
 
         Recopier « linkedin:4450246254 » depuis le digest était assez pénible
         pour que le suivi ne soit jamais utilisé : 9 637 offres, aucune
         marquée. On accepte donc aussi un bout de nom d'entreprise ou
-        d'intitulé — « wijin », « worldline devops ».
+        d'intitulé — « wijin », « worldline devops » — et, plus utile encore,
+        le LIEN de l'offre tel quel : c'est ce qu'on a sous la main en
+        arrivant depuis le site plutôt que depuis le digest.
         """
+        terme = terme.strip()
         exact = self.db.execute(
-            "SELECT * FROM jobs WHERE uid = ?", (terme.strip(),)
+            "SELECT * FROM jobs WHERE uid = ?", (terme,)
         ).fetchone()
         if exact:
             return [exact]
 
-        mots = [m for m in terme.strip().split() if m]
+        if terme.startswith(("http://", "https://")):
+            # Court-circuit : les paramètres de tracking (utm_*...) varient
+            # d'une copie à l'autre du même lien, d'où le préfixe avant `?`.
+            # Une URL ne matchera jamais la recherche par mots plus bas —
+            # inutile de la lui faire traverser.
+            sans_requete = terme.split("?", 1)[0]
+            ligne = self.db.execute(
+                "SELECT * FROM jobs WHERE url = ? OR url LIKE ? ESCAPE '\\'",
+                (terme, sans_requete.replace("%", "\\%").replace("_", "\\_") + "%"),
+            ).fetchone()
+            return [ligne] if ligne else []
+
+        mots = [m for m in terme.split() if m]
         if not mots:
             return []
         # Tous les mots doivent apparaître, dans le titre ou l'entreprise.
