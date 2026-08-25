@@ -10,10 +10,30 @@ import json
 import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .models import Job
 
 STATUTS = ("new", "seen", "shortlisted", "applied", "rejected")
+
+# Paramètres de SUIVI uniquement — jamais un paramètre qui pourrait porter
+# l'identité de l'offre. `jk` (Indeed), par exemple, n'y figure pas : c'est
+# justement ce paramètre-là qui distingue une offre d'une autre sur ce site.
+_PARAMS_SUIVI = {"utm_source", "utm_medium", "utm_campaign", "utm_term",
+                 "utm_content", "tk", "from", "ref", "referrer"}
+
+
+def _sans_suivi(url: str) -> str:
+    """Normalise une URL pour comparaison : retire les paramètres de suivi
+    connus, trie le reste. Deux copies du même lien, l'une avec `utm_*`
+    l'autre sans, doivent produire la même chaîne — mais deux offres
+    différentes du même site ne doivent JAMAIS produire la même chaîne."""
+    partes = urlsplit((url or "").strip())
+    requete = urlencode(sorted(
+        (cle, val) for cle, val in parse_qsl(partes.query, keep_blank_values=True)
+        if cle.lower() not in _PARAMS_SUIVI
+    ))
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, requete, ""))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -179,16 +199,25 @@ class Store:
             return [exact]
 
         if terme.startswith(("http://", "https://")):
-            # Court-circuit : les paramètres de tracking (utm_*...) varient
-            # d'une copie à l'autre du même lien, d'où le préfixe avant `?`.
-            # Une URL ne matchera jamais la recherche par mots plus bas —
-            # inutile de la lui faire traverser.
-            sans_requete = terme.split("?", 1)[0]
-            ligne = self.db.execute(
-                "SELECT * FROM jobs WHERE url = ? OR url LIKE ? ESCAPE '\\'",
-                (terme, sans_requete.replace("%", "\\%").replace("_", "\\_") + "%"),
-            ).fetchone()
-            return [ligne] if ligne else []
+            # Filtre SQL large sur le chemin seul (rapide, imprécis), suivi
+            # d'une comparaison EXACTE en Python après avoir retiré les seuls
+            # paramètres de suivi CONNUS (utm_*...). Ne JAMAIS trancher toute
+            # la requête au premier « ? », comme une version antérieure : sur
+            # Indeed, l'identifiant réel de l'offre est lui-même en paramètre
+            # (`jk=...`) — le couper faisait matcher la première offre Indeed
+            # venue en base, pas celle demandée. Une donnée fausse qui a
+            # l'air correcte est le pire résultat possible ici.
+            partes = urlsplit(terme)
+            prefixe = f"{partes.scheme}://{partes.netloc}{partes.path}"
+            cible = _sans_suivi(terme)
+            candidats = self.db.execute(
+                "SELECT * FROM jobs WHERE url LIKE ? ESCAPE '\\'",
+                (prefixe.replace("%", "\\%").replace("_", "\\_") + "%",),
+            ).fetchall()
+            for c in candidats:
+                if _sans_suivi(c["url"] or "") == cible:
+                    return [c]
+            return []
 
         mots = [m for m in terme.split() if m]
         if not mots:

@@ -516,13 +516,6 @@ le radar. Deux niveaux :
    titre et le texte visible de la page, moins fiable : vérifie le résultat
    ```
 
-**indeed.com est exclu des deux**, pas seulement de `postuler` (voir
-ci-dessus) : constaté sur ce projet, la même URL `viewjob` a renvoyé deux
-entreprises différentes à quelques minutes d'écart, sans rien qui le
-signale dans la réponse. Une donnée fausse qui a l'air correcte est pire
-qu'un échec franc — l'extraction est refusée plutôt que risquer un CV bâti
-sur la mauvaise offre.
-
 L'offre récupérée passe par le même calcul de tags que toutes les autres —
 rien n'est ajouté à ta base, c'est un aller simple pour un CV.
 

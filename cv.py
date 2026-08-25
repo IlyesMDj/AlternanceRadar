@@ -122,17 +122,6 @@ def _depuis_page_brute(soup, url: str):
               location="", url=url, description=description)
 
 
-# Domaines constatés servant un contenu DIFFÉRENT à la même URL selon le
-# moment de la requête — pas un blocage franc (403/Cloudflare, détectable),
-# mais une offre bien formée, JobPosting complet, qui n'est simplement pas
-# la bonne. Vérifié sur indeed.com : trois requêtes à quelques minutes
-# d'écart sur la même URL `viewjob` ont renvoyé « ASSYSTEM » quand une
-# précédente avait renvoyé « Generix Group ». Rien dans la réponse ne permet
-# de distinguer ce cas d'une extraction correcte — mieux vaut refuser que
-# risquer un CV bâti sur la mauvaise offre.
-_DOMAINES_INSTABLES = ("indeed.com", "indeed.fr")
-
-
 def depuis_url(url: str):
     """Récupère une offre depuis N'IMPORTE QUELLE URL. Deux niveaux :
 
@@ -151,22 +140,10 @@ def depuis_url(url: str):
     le pipeline habituel (`classify` + `score`) pour obtenir des tags
     comparables à ceux d'une offre déjà en base.
     """
-    from urllib.parse import urlparse
-
     from bs4 import BeautifulSoup
     from curl_cffi import requests as cffi
 
     from core.models import Job
-
-    hote = urlparse(url).netloc.lower()
-    if any(d in hote for d in _DOMAINES_INSTABLES):
-        log.error("%s sert parfois une offre DIFFÉRENTE de celle attendue à "
-                  "la même URL selon le moment de la requête (constaté), "
-                  "sans que rien ne le signale — extraction refusée plutôt "
-                  "que risquer un CV bâti sur la mauvaise offre. Ouvre le "
-                  "lien toi-même et recopie titre/entreprise/description "
-                  "à la main", hote)
-        return None
 
     session = cffi.Session(impersonate="chrome124", timeout=30)
     try:
