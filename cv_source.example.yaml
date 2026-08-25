@@ -1,0 +1,71 @@
+# ============================================================
+#  Exemple à copier en cv_source.yaml et à remplir avec ton propre
+#  parcours. cv_source.yaml (le vrai) n'est jamais versionné : voir
+#  .gitignore. Voir cv_source.yaml (généré ici, gitignoré) pour un exemple
+#  complet une fois rempli.
+# ============================================================
+
+identite:
+  nom: "Ton Nom"
+  titre: "Ton intitulé (ex. Développeur Web/Logiciel)"
+  email: "ton.email@exemple.fr"
+  telephone: ""
+  ville: "Ta ville (code postal)"
+  portfolio: ""
+  linkedin: ""
+  github: ""
+  permis: ""
+
+langues:
+  - {nom: "Anglais", niveau: "B1"}
+
+# Groupes alignés sur `scoring.competences` de config.yaml (mêmes clés :
+# cloud, mobile, devops_ci, tests_qualite, python, csharp, java, typescript,
+# archi, ia_data, bdd, api, web_front, php). Un groupe sans compétence reste
+# une liste vide — ne pas inventer un skill qu'on n'a pas.
+competences:
+  cloud: []
+  mobile: []
+  devops_ci: []
+  tests_qualite: []
+  python: []
+  csharp: []
+  java: []
+  typescript: []
+  archi: []
+  ia_data: []
+  bdd: []
+  api: []
+  web_front: []
+  php: []
+
+competences_hors_groupes: []
+competences_transversales: []
+centres_interet: []
+
+# Ordre chronologique inverse — jamais réordonné par `cv.py`, qui ne trie
+# que les BULLETS de chaque entrée.
+formation:
+  - titre: "Ton diplôme"
+    lieu: "Ton établissement, ville"
+    periode: "Depuis sept. 2025"
+
+experiences:
+  - titre: "Ton intitulé de poste"
+    entreprise: "Ton employeur"
+    lieu: "Ville"
+    periode: "De mois AAAA à mois AAAA"
+    bullets:
+      # `tags` = sous-ensemble des clés de `competences` ci-dessus. Une
+      # offre qui matche ces tags fait remonter ce bullet en tête.
+      - texte: "Ce que tu as réellement fait, en une phrase."
+        tags: []
+
+# Contrairement aux expériences, l'ORDRE des projets change selon l'offre :
+# ils n'ont pas de valeur chronologique à préserver.
+projets:
+  - titre: "Nom du projet"
+    description: "Une phrase de contexte."
+    bullets:
+      - texte: "Ce que tu as réellement fait."
+        tags: []

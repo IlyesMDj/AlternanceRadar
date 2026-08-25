@@ -475,6 +475,28 @@ beaucoup de formulaires l'exigent, pense à le compléter.
 
 ---
 
+## CV — génération adaptée à l'offre
+
+```powershell
+.\radar.ps1 cv explain
+```
+
+Réordonne `cv_source.yaml` (compétences, puces d'expérience, projets) selon
+les tags déjà calculés pour l'offre — jamais de contenu inventé, jamais
+l'ordre chronologique des postes réécrit. Produit un `.tex` dans
+`store/cv/<uid>/`, et un PDF si `pdflatex` (MiKTeX, TeX Live) est installé.
+
+Première utilisation : copie `cv_source.example.yaml` en `cv_source.yaml` et
+remplis-le avec ton propre parcours (jamais versionné, comme `config.yaml`).
+
+Avec `$env:GEMINI_API_KEY` défini (comme `LBA_API_KEY`), un court paragraphe
+d'accroche personnalisé s'ajoute en tête, écrit par Gemini à partir des
+seuls faits fournis (formation, rythme, compétences qui recoupent l'offre).
+Sans la clé, ou si l'appel échoue, le CV se génère normalement, juste sans
+ce paragraphe.
+
+---
+
 ## 9. Toutes les commandes
 
 ```powershell
@@ -495,6 +517,8 @@ beaucoup de formulaires l'exigent, pense à le compléter.
 .\radar.ps1 rescore                            # recalcule sans re-collecter
 .\radar.ps1 stats                              # état de la base
 .\radar.ps1 mark <uid> <statut> [--notes "…"]
+.\radar.ps1 postuler <uid>                     # pré-remplit le formulaire (n'envoie rien)
+.\radar.ps1 cv <uid>                           # CV LaTeX adapté à l'offre
 ```
 
 Options de test, utiles pour vérifier un changement sans lancer un run complet :

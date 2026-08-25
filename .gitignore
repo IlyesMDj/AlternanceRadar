@@ -15,6 +15,11 @@ __pycache__/
 # Copie config.example.yaml en config.yaml et personnalise.
 config.yaml
 
+# Contenu réel du CV (expériences, formation...) et les PDF générés à partir.
+# Copie cv_source.example.yaml en cv_source.yaml et personnalise.
+cv_source.yaml
+store/cv/
+
 # Données collectées
 store/jobs.db
 store/jobs.db-*

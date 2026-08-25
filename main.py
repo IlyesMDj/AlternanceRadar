@@ -1327,6 +1327,61 @@ def cmd_postuler(args, cfg: dict, store: Store) -> None:
         navigateur.fermer()
 
 
+def cmd_cv(args, cfg: dict, store: Store) -> None:
+    """Génère un CV LaTeX (et son PDF si possible) adapté à une offre.
+
+    Le contenu ne change jamais : `cv.py` réordonne `cv_source.yaml` selon
+    les tags déjà calculés pour l'offre — il n'invente ni ne reformule rien,
+    et sans LLM.
+    """
+    import hashlib
+    import json
+
+    import cv as cvgen
+
+    trouves = store.resoudre(args.uid)
+    if not trouves:
+        log.error("aucune offre ne correspond à « %s »", args.uid)
+        return
+    if len(trouves) > 1:
+        print(f"\n  {len(trouves)} offres correspondent — précise :\n")
+        for o in trouves[:10]:
+            print(f"    {o['uid']:<28} {(o['title'] or '')[:44]:<44} "
+                  f"{(o['company'] or '')[:22]}")
+        print()
+        return
+
+    job = trouves[0]
+    chemin_source = RACINE / "cv_source.yaml"
+    if not chemin_source.exists():
+        log.error("cv_source.yaml introuvable — copie cv_source.example.yaml "
+                  "et personnalise-le avec ton propre parcours")
+        return
+
+    cv_data = cvgen.charger(chemin_source)
+    tags = json.loads(job["tags"] or "[]")
+    # Un hash court, jamais l'uid brut : certaines sources (DevITjobs...)
+    # portent l'URL entière en guise d'external_id, pleine de « / » qui
+    # créeraient une arborescence de dossiers au lieu d'un seul.
+    identifiant = hashlib.sha1(job["uid"].encode()).hexdigest()[:16]
+    dossier = RACINE / "store" / "cv" / identifiant
+    chemin_tex, chemin_pdf = cvgen.generer(
+        tags, cv_data, cfg, dossier,
+        job_titre=job["title"] or "", job_entreprise=job["company"] or "",
+        job_description=job["description"] or "",
+    )
+
+    print(f"\n  {job['title']}")
+    print(f"  {job['company']} · {job['location']}")
+    print(f"  tags retenus : {', '.join(tags) or '(aucun)'}\n")
+    print(f"  .tex : {chemin_tex}")
+    if chemin_pdf:
+        print(f"  pdf  : {chemin_pdf}\n")
+    else:
+        print("  pdf  : échec — voir le .log dans le même dossier, ou compile\n"
+              "         le .tex ailleurs (Overleaf...)\n")
+
+
 def cmd_contacts(args, cfg: dict, store: Store) -> None:
     """Toutes les pistes joignables DIRECTEMENT, lien et adresse en clair.
 
@@ -1552,6 +1607,11 @@ def main() -> None:
                                          "formulaire (n'envoie rien)")
     po.add_argument("uid", help="identifiant de l'offre, ou un bout de son nom")
     po.set_defaults(fn=cmd_postuler)
+
+    cv = sub.add_parser("cv", help="génère un CV LaTeX adapté à une offre "
+                                   "(cv_source.yaml réordonné, sans LLM)")
+    cv.add_argument("uid", help="identifiant de l'offre, ou un bout de son nom")
+    cv.set_defaults(fn=cmd_cv)
 
     ct = sub.add_parser("contacts", help="les pistes joignables directement : "
                                          "lien du post et adresse e-mail")

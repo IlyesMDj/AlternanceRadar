@@ -12,7 +12,7 @@ d'œil où en est chaque candidature.
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install httpx beautifulsoup4 lxml pyyaml
+.venv\Scripts\python.exe -m pip install httpx beautifulsoup4 lxml pyyaml google-genai
 ```
 
 ## Utilisation
