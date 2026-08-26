@@ -273,10 +273,24 @@ def fabriquer(store: Store, cfg: dict, defauts: dict, collecte: Collecte):
     return Digest
 
 
+class _Serveur(HTTPServer):
+    def handle_error(self, request, client_address) -> None:
+        """Le navigateur ferme parfois la connexion avant la fin de l'envoi —
+        onglet fermé, page rechargée en plein chargement. Rien d'anormal
+        pour un usage local mono-utilisateur, mais `socketserver` en
+        afficherait par défaut la trace complète à chaque fois. Toute AUTRE
+        exception continue de s'afficher normalement : seules celles-ci sont
+        du bruit attendu, pas les vraies pannes."""
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def servir(store: Store, cfg: dict, options: dict,
            port: int = 8765, ouvrir: bool = True) -> None:
     collecte = Collecte()
-    httpd = HTTPServer((HOTE, port), fabriquer(store, cfg, options, collecte))
+    httpd = _Serveur((HOTE, port), fabriquer(store, cfg, options, collecte))
     adresse = f"http://{HOTE}:{httpd.server_port}/"
 
     print(f"\n  Digest servi sur {adresse}")
