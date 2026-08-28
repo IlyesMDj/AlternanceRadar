@@ -67,6 +67,19 @@ ATTENDUS: dict[str, dict] = {
     "lba":            {"min": 5,  "champs": ("title", "company", "url")},
     "lba_entreprise": {"min": 20, "champs": ("title", "company", "url")},
     "linkedin_post":  {"min": 1,  "champs": ("title", "company", "description")},
+    # Même source que `linkedin_post`, mais un volume sans rapport : plusieurs
+    # requêtes paginées rapportent des dizaines de posts, dont la moitié part
+    # au tri recruteur/candidat. Étiquette distincte pour que la comparaison
+    # au passage précédent reste honnête. `posted_at` est exigé : il vient de
+    # l'identifiant d'activité dans l'URL, jamais du DOM — s'il manque, c'est
+    # que le moteur a rendu des liens d'une autre forme.
+    # Seuil à 1, comme `linkedin_post` : ce que le moteur indexe est vieux
+    # (âge médian 141 jours), donc un run n'en retient que quelques-uns une
+    # fois la fenêtre appliquée — 1 sur 220 trouvés au premier essai réel.
+    # Exiger davantage ferait sonner l'alerte à chaque run, ce qui est le
+    # meilleur moyen de la faire ignorer.
+    "posts_web":      {"min": 1,  "champs": ("title", "company", "url",
+                                             "posted_at", "description")},
     # La sonde complète 10 fiches : le seuil laisse une marge sous ce chiffre
     # pour ne pas crier au loup si une fiche a expiré entre-temps.
     "jobteaser":      {"min": 8,  "champs": ("title", "company", "url", "posted_at")},

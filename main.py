@@ -1011,6 +1011,64 @@ def cmd_posts(args, cfg: dict, store: Store) -> None:
     cmd_stats(args, cfg, store)
 
 
+def cmd_posts_web(args, cfg: dict, store: Store) -> None:
+    """Posts LinkedIn trouvés par DuckDuckGo, sans passer par LinkedIn Search.
+
+    Complète `posts` plutôt qu'il ne le remplace : celui-ci n'exige aucune
+    session, ne peut pas déclencher la coupure de la recherche LinkedIn, et
+    n'est donc pas soumis au délai de six heures. En revanche il ne voit que
+    ce qu'un moteur a indexé — donc plutôt des posts déjà anciens de
+    quelques jours, là où `posts` voit l'heure qui vient.
+    """
+    from collectors.posts_web import PostsWeb
+
+    w = cfg.get("posts_web", {})
+    preparer = pipeline(cfg)
+    heures, age_max = fenetre_de(args, w.get("age_max_jours", 21) * 24)
+
+    requetes = [str(r).strip() for r in w.get("requetes", []) if str(r).strip()]
+    if not requetes:
+        log.error("aucune requête dans `posts_web.requetes` de config.yaml")
+        return
+
+    client = PostsWeb(delai=w.get("delai", 2.5), pages=w.get("pages", 3))
+    client.ouvrir()
+    trouves: dict[str, Job] = {}
+    try:
+        for requete in requetes:
+            urls = client.chercher(requete)
+            for post in client.lire(urls, age_max):
+                trouves.setdefault(post.external_id, post)
+    except Exception as e:
+        log.error("échec : %s", e)
+    finally:
+        client.fermer()
+
+    if not trouves:
+        log.error("aucun post retenu — DuckDuckGo a-t-il servi une page vide ? "
+                  "(le mode sans interface ne fonctionne pas, voir posts_web.py)")
+        return
+
+    # Étiquette de canari distincte de `linkedin_post` : les deux collecteurs
+    # alimentent la même source mais n'ont aucune raison d'avoir le même
+    # volume, et les comparer entre eux ferait sonner l'alerte à chaque fois.
+    surveiller(store, "posts_web", list(trouves.values()), age_max)
+
+    connus = store.ids_connus("linkedin_post")
+    nouveaux = [p for p in trouves.values() if p.external_id not in connus]
+    log.info("%d posts retenus, %d nouveaux (%d recherches)",
+             len(trouves), len(nouveaux), client.requetes)
+
+    retenues = avec_contact = 0
+    for post in nouveaux:
+        if store.upsert(preparer(post)):
+            retenues += 1
+            avec_contact += bool(post.contacts)
+    log.info("terminé — %d nouveaux posts, dont %d avec contact direct",
+             retenues, avec_contact)
+    cmd_stats(args, cfg, store)
+
+
 def cmd_canari(args, cfg: dict, store: Store) -> None:
     """Sonde chaque collecteur avec une requête connue, et valide la donnée.
 
@@ -1804,6 +1862,11 @@ def main() -> None:
                     help="passe outre le délai minimum entre deux collectes "
                          "(risque de coupure de la recherche par LinkedIn)")
     po.set_defaults(fn=cmd_posts)
+
+    pw = sub.add_parser("posts-web", help="posts LinkedIn via DuckDuckGo "
+                                          "(sans session, sans risque de coupure)")
+    _ajouter_depuis(pw)
+    pw.set_defaults(fn=cmd_posts_web)
 
     rs = sub.add_parser("rescore", help="re-score la base après édition du config")
     rs.set_defaults(fn=cmd_rescore)

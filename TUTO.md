@@ -356,13 +356,52 @@ Un run relève deux choses :
    formulations les moins rentables. `false` pour revenir à l'ancien
    comportement.
 
-> **Pourquoi le balayage large s'arrête à 5 recherches.** C'est la limite de
-> LinkedIn, pas du programme. La recherche de contenu est le seul moyen de
-> voir *tous* les posts, et c'est précisément elle qui se coupe quand on
-> insiste. Les canaux externes ne remplacent pas : testé, DuckDuckGo sert un
-> CAPTCHA, Bing n'indexe aucune URL `/posts/`, et le grounding Google via
-> Gemini épuise son quota. Pour élargir, mieux vaut donc **de meilleurs
-> mots-clés et plus de comptes suivis** que plus de recherches.
+> **Pourquoi ce balayage s'arrête à 5 recherches.** C'est la limite de
+> LinkedIn, pas du programme : la recherche de contenu est ce qui se coupe
+> quand on insiste. Pour aller au-delà sans risque, voir
+> [`posts-web`](#balayage-large-sans-session--radarps1-posts-web) plus bas,
+> qui passe par un moteur de recherche externe.
+
+### Balayage large sans session : `.\radar.ps1 posts-web`
+
+Même objectif — trouver *tous* les posts d'offres — mais par l'extérieur :
+c'est **DuckDuckGo qui cherche**, pas LinkedIn.
+
+```powershell
+.\radar.ps1 posts-web
+```
+
+Conséquence directe : **aucune requête n'atteint la recherche LinkedIn**.
+Donc pas de session à établir, pas de délai de six heures, pas de risque de
+coupure. Tu peux le lancer autant que tu veux.
+
+Une fenêtre Chrome s'ouvre quand même : en mode sans interface, DuckDuckGo
+rend une page vide (0 résultat contre 10 en mode visible). Chaque post est
+ensuite lu par un simple client HTTP, hors session, et passé au **même** tri
+recruteur/candidat que `posts`.
+
+**Ce qu'il faut en attendre, mesuré sur un run réel** : 290 posts balayés en
+6 requêtes → 2 retenus, dont 1 avec adresse e-mail directe. Le rendement
+paraît faible, et il l'est : ce qu'un moteur indexe est **vieux**, âge
+médian 141 jours, ~13 % à moins de trois semaines. Une offre d'alternance de
+cinq mois est pourvue depuis longtemps, donc elle est écartée.
+
+C'est donc un canal de **largeur**, pas de fraîcheur :
+
+| | `posts` | `posts-web` |
+|---|---|---|
+| Cherche via | LinkedIn | DuckDuckGo |
+| Session | requise | aucune |
+| Délai entre runs | 6 h | aucun |
+| Risque de coupure | réel | nul |
+| Fraîcheur | l'heure qui vient | médiane 141 j |
+
+Les deux se complètent et partagent la même clé d'activité : un post vu par
+les deux voies n'est **pas** enregistré deux fois.
+
+Le filtre de fraîcheur de DuckDuckGo (`df=m`) n'aide pas — testé, il rend une
+médiane de 61 jours tout en divisant le volume par quatre. On pagine donc
+large et on trie sur la date, qui est encodée dans l'URL du post.
 
 ### Qui suivre : `.\radar.ps1 comptes`
 
@@ -619,6 +658,7 @@ rien n'est ajouté à ta base, c'est un aller simple pour un CV.
 .\radar.ps1 glassdoor   [--depuis X]           # Glassdoor
 .\radar.ps1 lba         [--depuis X]           # La Bonne Alternance + marché caché
 .\radar.ps1 posts       [--depuis X]           # posts LinkedIn (session requise)
+.\radar.ps1 posts-web   [--depuis X]           # posts via DuckDuckGo (sans session)
 .\radar.ps1 report      [--score-min N] [--statut S] [--max-age JOURS]
                         [--tri score|date|entreprise|ville]
 .\radar.ps1 serve       [--port N] [mêmes filtres que report]
