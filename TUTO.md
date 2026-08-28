@@ -364,7 +364,32 @@ alternances de développement en publiera d'autres :
     - "company/groupe-sii"     # 5 offres, score moyen 68 · Groupe SII
 ```
 
-Aucune requête réseau : tout vient de ce qui est déjà collecté. Deux filtres
+**Depuis un post précis** — quand tu tombes sur une offre en scrollant, plutôt
+que de noter l'entreprise à la main :
+
+```powershell
+.\radar.ps1 comptes --post "https://www.linkedin.com/posts/jade-aubry-..."
+```
+
+```
+  Jade Aubry
+  💻 [ OFFRE · Alternance · Développement logiciel · Châlons-en-Champagne ]
+     Groupe JVS recrute un(e) alternant(e) Développeur…
+
+  → offre de RECRUTEUR : le filtre de collecte la retient.
+
+    - "in/jade-aubry-495739142"
+```
+
+C'est le seul cas où le slug est **certain** : il est écrit dans l'adresse.
+Le post est lu au passage (hors session) et passé au même discriminateur
+recruteur/candidat que la collecte — suivre un candidat n'aurait aucun
+intérêt, c'est un concurrent. Beaucoup de recruteurs publient depuis leur
+**profil personnel** (`in/…`) et non depuis la page entreprise : ces posts-là
+donnent souvent une adresse e-mail directe.
+
+Aucune requête réseau pour la suggestion par employeurs : tout vient de ce
+qui est déjà collecté. Deux filtres
 font l'essentiel du travail, et les abaisser dégrade vite la liste :
 
 - **`--score-min`** écarte les employeurs qui publient beaucoup d'alternances

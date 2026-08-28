@@ -1417,6 +1417,71 @@ def _slugifier(nom: str) -> str:
     return re.sub(r"\s+", "-", normalize(nom).strip())
 
 
+def _compte_depuis_post(url: str, deja: set[str]) -> None:
+    """Résout le compte à suivre à partir de l'URL d'un post.
+
+    Le seul cas où le slug est CERTAIN : il est écrit dans l'adresse même
+    (`/posts/<auteur>_…`). Partout ailleurs il faut le deviner ou le relever
+    dans une offre — voir `cmd_comptes`.
+
+    Le post est lu au passage, hors session, pour deux raisons : montrer ce
+    qu'on s'apprête à suivre, et passer le texte au même discriminateur
+    recruteur/candidat que la collecte. Suivre un candidat n'aurait aucun
+    intérêt : c'est un concurrent, pas un employeur.
+    """
+    import httpx
+
+    from collectors.linkedin_posts import (_LIEN_POST, est_offre_recruteur,
+                                           extraire_emails, lire_post,
+                                           normalize_accents)
+
+    trouve = _LIEN_POST.search(url)
+    if not trouve:
+        log.error("ce lien n'est pas un post LinkedIn — attendu une adresse "
+                  "de la forme /posts/<auteur>_…-activity-<id>-<code>")
+        return
+
+    auteur_slug = trouve.group(1)
+    entete = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0 Safari/537.36",
+              "Accept-Language": "fr-FR,fr;q=0.9"}
+    with httpx.Client(follow_redirects=True, timeout=25, headers=entete) as client:
+        post = lire_post(url.split("?", 1)[0], client)
+
+    texte = post.get("texte", "")
+    if not texte:
+        log.warning("post illisible (supprimé, privé, ou LinkedIn a servi un "
+                    "mur de connexion) — le compte reste suggérable")
+
+    print(f"\n  {post.get('auteur') or auteur_slug}")
+    if texte:
+        extrait = " ".join(texte.split())
+        print(f"  {extrait[:200]}{'…' if len(extrait) > 200 else ''}\n")
+        if est_offre_recruteur(normalize_accents(texte)):
+            print("  → offre de RECRUTEUR : le filtre de collecte la retient.")
+        else:
+            print("  → post de CANDIDAT selon le filtre : un concurrent, pas")
+            print("    un employeur. Suivre ce compte n'a probablement aucun")
+            print("    intérêt — vérifie avant de l'ajouter.")
+        contacts = extraire_emails(texte)
+        if contacts:
+            print(f"  → contact direct : {', '.join(contacts)}")
+
+    # `/posts/<slug>` ne dit pas si le slug est une personne ou une page
+    # d'entreprise, et LinkedIn ne permet pas de le vérifier (999 en anonyme).
+    # On propose la forme « in/ », de loin la plus fréquente pour un lien de
+    # post partagé, en signalant l'autre.
+    entree = f"in/{auteur_slug}"
+    if entree.lower() in deja:
+        print(f"\n  Déjà suivi : {entree}\n")
+        return
+    print("\n  À ajouter sous `posts.comptes_suivis` dans config.yaml :\n")
+    print(f'    - "{entree}"')
+    print(f'\n  (si c\'est une page d\'entreprise et non un profil, écris '
+          f'plutôt "company/{auteur_slug}")\n')
+
+
 def cmd_comptes(args, cfg: dict, store: Store) -> None:
     """Suggère des pages d'entreprise à surveiller dans `posts.comptes_suivis`.
 
@@ -1430,6 +1495,12 @@ def cmd_comptes(args, cfg: dict, store: Store) -> None:
     """
     p = cfg.get("posts", {})
     deja = {c.strip().strip("/").lower() for c in p.get("comptes_suivis", [])}
+
+    # Un post précis l'emporte : son auteur est le compte à suivre, et son
+    # slug est le seul qu'on connaisse avec certitude.
+    if getattr(args, "post", None):
+        _compte_depuis_post(args.post.strip(), deja)
+        return
 
     employeurs = store.employeurs_recurrents(
         score_min=args.score_min, minimum=args.minimum, limite=args.limite)
@@ -1706,8 +1777,11 @@ def main() -> None:
                                 "ou l'URL de l'offre (collectée ou non)")
     cv.set_defaults(fn=cmd_cv)
 
-    cp = sub.add_parser("comptes", help="quelles pages d'entreprise surveiller "
+    cp = sub.add_parser("comptes", help="quels comptes surveiller "
                                         "dans posts.comptes_suivis")
+    cp.add_argument("--post", metavar="URL", default=None,
+                    help="l'URL d'un post : suggère d'en suivre l'AUTEUR "
+                         "(son slug est certain, il est dans l'adresse)")
     cp.add_argument("--score-min", type=int, default=40,
                     help="score minimum d'une offre pour compter (défaut : 40)")
     cp.add_argument("--minimum", type=int, default=4, metavar="N",

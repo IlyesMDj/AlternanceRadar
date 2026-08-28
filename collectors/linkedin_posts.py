@@ -63,9 +63,21 @@ _CHALLENGE = ("/checkpoint/", "/authwall", "/uas/login", "captcha")
 # Le lien « vanity » d'un post, seule forme que LinkedIn sert à un visiteur
 # anonyme : /posts/{auteur}_{slug}-activity-{id}-{code}. Le groupe 2 isole
 # l'identifiant d'activité, qui encode aussi la date de publication.
+#
+# `share` et `ugcPost` valent `activity` — mêmes trois formes que l'URN plus
+# bas, qui les acceptait déjà. Ne reconnaître qu'`activity` faisait retomber
+# ces posts sur l'URL canonique /feed/update/…, que `lire_post()` ne sait
+# justement PAS lire hors session : leur texte complet, donc les adresses de
+# contact qui en sont l'intérêt principal, était perdu en silence. Vérifié
+# sur un post en `-share-` : lisible anonymement, et son identifiant décode
+# vers une date plausible exactement comme un `activity`.
+# Le groupe 1 s'arrête avant l'underscore, qui sépare le slug de l'AUTEUR de
+# celui du contenu : un identifiant public LinkedIn n'en contient jamais.
+# Avec `\w` (qui inclut « _ ») il capturait « jade-aubry-495739142_alternance
+# -apprentissage-developpement » au lieu du seul auteur.
 _LIEN_POST = re.compile(
-    r"(?:https://[a-z]{2,3}\.linkedin\.com)?/posts/([\w\-%.]+)"
-    r"[^\"'\s]*?-activity-(\d{15,25})-[\w_-]+")
+    r"(?:https://[a-z]{2,3}\.linkedin\.com)?/posts/([a-zA-Z0-9\-%.]+)"
+    r"[^\"'\s]*?-(?:activity|share|ugcPost)-(\d{15,25})-[\w_-]+")
 
 # Repli : l'identifiant d'activité nu, sous n'importe quel emballage —
 # attribut de suivi, JSON embarqué, menu « copier le lien ».
