@@ -331,19 +331,45 @@ def _classe(score: int) -> str:
     return "moyen" if score >= 20 else "faible"
 
 
+def age_relatif(publie: str | None) -> str:
+    """« hier », « il y a 5 jours », « il y a 3 semaines », « il y a 5 mois ».
+
+    L'âge relatif est plus parlant qu'une date brute quand on cherche du
+    frais : « il y a 2 jours » se lit sans calcul mental. Mais au-delà de
+    deux semaines le compte en jours cesse de se lire — « il y a 141 jours »
+    demande le même calcul qu'une date. On change donc d'unité, ce qui
+    compte surtout depuis `posts-web` : ce qu'un moteur indexe est vieux, et
+    c'est justement l'information qu'on veut voir d'un coup d'œil.
+
+    Retourne "" si la date est absente ou illisible : c'est à l'appelant de
+    décider quoi afficher à la place, une date manquante n'ayant pas le même
+    sens partout (le marché caché n'en a jamais).
+    """
+    if not publie:
+        return ""
+    try:
+        jours = (date.today() - date.fromisoformat(publie)).days
+    except ValueError:
+        return ""
+    if jours <= 0:
+        return "aujourd'hui"
+    if jours == 1:
+        return "hier"
+    if jours < 14:
+        return f"il y a {jours} jours"
+    if jours < 60:
+        semaines = jours // 7
+        return f"il y a {semaines} semaine{'s' if semaines > 1 else ''}"
+    return f"il y a {jours // 30} mois"
+
+
 def _carte(o) -> str:
     """Rend une offre ou une entreprise en carte HTML."""
     tags = json.loads(o["tags"] or "[]")
     lieu = " · ".join(x for x in (o["company"], o["location"]) if x)
-    # L'âge relatif est plus parlant qu'une date brute quand on cherche du
-    # frais : « il y a 2 jours » se lit sans calcul mental.
     if o["posted_at"]:
-        try:
-            jours = (date.today() - date.fromisoformat(o["posted_at"])).days
-            date_pub = (" · aujourd'hui" if jours <= 0 else " · hier" if jours == 1
-                        else f" · il y a {jours} jours")
-        except ValueError:
-            date_pub = f" · {o['posted_at']}"
+        age = age_relatif(o["posted_at"])
+        date_pub = f" · {age}" if age else f" · {o['posted_at']}"
     elif o["source"] == "lba_entreprise":
         date_pub = ""      # liste permanente, une date n'aurait aucun sens
     else:

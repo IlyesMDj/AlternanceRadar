@@ -1654,6 +1654,8 @@ def cmd_contacts(args, cfg: dict, store: Store) -> None:
     """
     import json
 
+    from report import age_relatif
+
     lignes = store.selection(score_min=args.score_min, alternance_seulement=True,
                              limite=400, age_max_heures=fenetre_affichage(args),
                              tri="date")
@@ -1690,7 +1692,7 @@ def cmd_contacts(args, cfg: dict, store: Store) -> None:
         for adresse, o in mails:
             print(f"  {adresse}")
             print(f"     {(o['title'] or '')[:66]}")
-            print(f"     {o['company']} · {o['posted_at'] or 'sans date'} "
+            print(f"     {o['company']} · {age_relatif(o['posted_at']) or 'sans date'} "
                   f"· score {o['score']}")
             print(f"     {o['url']}\n")
 
