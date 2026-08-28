@@ -12,13 +12,14 @@ d'œil où en est chaque candidature.
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install httpx beautifulsoup4 lxml pyyaml google-genai
+.venv\Scripts\python.exe -m pip install httpx curl_cffi beautifulsoup4 lxml pyyaml playwright google-genai
 ```
 
 ## Utilisation
 
-**Guide pas à pas : [`TUTO.md`](TUTO.md).** Ce README documente le
-fonctionnement interne et les choix techniques.
+**Démarrage et usage quotidien : [`DEMARRAGE.md`](DEMARRAGE.md).**
+**Détail de chaque réglage : [`TUTO.md`](TUTO.md).**
+Ce README documente le fonctionnement interne et les choix techniques.
 
 `radar.ps1` évite de retaper le chemin de l'interpréteur, depuis n'importe quel
 dossier :
