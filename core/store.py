@@ -7,6 +7,7 @@ offre, et savoir en un coup d'œil où on en est sur chacune.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -355,6 +356,70 @@ class Store:
         "entreprise": "company COLLATE NOCASE ASC, score DESC",
         "ville": "location COLLATE NOCASE ASC, score DESC",
     }
+
+    def employeurs_recurrents(self, score_min: int = 40, minimum: int = 4,
+                              limite: int = 30) -> list[sqlite3.Row]:
+        """Les entreprises qui publient RÉGULIÈREMENT des alternances visées.
+
+        Sert à peupler `posts.comptes_suivis` : une entreprise qui a déjà
+        publié dix alternances de développement en publiera d'autres, et
+        surveiller sa page coûte une seule page vue — sans passer par le
+        moteur de recherche, qui est ce qui déclenche la coupure.
+
+        Deux filtres sans lesquels la liste est inexploitable, tous deux
+        mesurés sur la base réelle :
+
+        - `score_min` écarte les employeurs qui publient beaucoup
+          d'alternances mais aucune en développement. Sans lui, le haut du
+          classement était Carrefour, Bricomarché et Coopérative U ;
+        - le tag « école/CFA » écarte les organismes de formation, qui
+          publient pour remplir leurs promotions et non pour recruter :
+          Talia.fr sortait en tête avec 216 offres, devant tout employeur
+          réel.
+        """
+        return self.db.execute(
+            """SELECT company,
+                      COUNT(*)          AS offres,
+                      CAST(ROUND(AVG(score)) AS INTEGER) AS moyenne,
+                      MAX(score)        AS meilleur
+               FROM jobs
+               WHERE duplicate_of IS NULL AND is_alternance = 1
+                 AND COALESCE(exclu, '') = '' AND TRIM(COALESCE(company, '')) != ''
+                 AND score >= ? AND tags NOT LIKE '%ecole/CFA%'
+               GROUP BY LOWER(company)
+               HAVING offres >= ?
+               ORDER BY offres DESC, moyenne DESC
+               LIMIT ?""",
+            (score_min, minimum, limite),
+        ).fetchall()
+
+    def slugs_linkedin(self) -> dict[str, str]:
+        """Table entreprise → slug LinkedIn, relevée dans les données déjà
+        collectées (une adresse `linkedin.com/company/…` citée dans une offre).
+
+        C'est la seule source de slug FIABLE dont on dispose : LinkedIn
+        répond 999 à une requête anonyme sur une page d'entreprise, et
+        jusqu'à 404 sur un slug pourtant valide — vérifié sur
+        « sopra-steria ». Impossible d'en confirmer un par requête, donc on
+        ne relève que ceux qui sont écrits noir sur blanc.
+        """
+        table: dict[str, str] = {}
+        motif = re.compile(r"linkedin\.com/company/([A-Za-z0-9\-_.%]+)")
+        for ligne in self.db.execute(
+            """SELECT company, url, description FROM jobs
+               WHERE TRIM(COALESCE(company, '')) != ''
+                 AND (url LIKE '%linkedin.com/company/%'
+                      OR description LIKE '%linkedin.com/company/%')"""
+        ):
+            cle = (ligne["company"] or "").strip().lower()
+            if cle in table:
+                continue
+            for champ in (ligne["url"], ligne["description"]):
+                trouve = motif.search(champ or "")
+                if trouve:
+                    table[cle] = trouve.group(1).rstrip("/")
+                    break
+        return table
 
     def selection(self, statut: str | None = None, score_min: int = 0,
                   alternance_seulement: bool = True, limite: int = 200,

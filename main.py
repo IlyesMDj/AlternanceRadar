@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -1403,6 +1404,76 @@ def cmd_cv(args, cfg: dict, store: Store) -> None:
               "         le .tex ailleurs (Overleaf...)\n")
 
 
+def _slugifier(nom: str) -> str:
+    """Devine le slug LinkedIn d'une entreprise à partir de son nom.
+
+    Une SUPPOSITION, jamais présentée autrement : « Sopra Steria » donne
+    bien « sopra-steria », mais « Dassault Systèmes » s'écrit
+    « dassaultsystemes » sans tiret sur LinkedIn. Rien ne permet de trancher
+    sans ouvrir la page.
+    """
+    from core.models import normalize
+
+    return re.sub(r"\s+", "-", normalize(nom).strip())
+
+
+def cmd_comptes(args, cfg: dict, store: Store) -> None:
+    """Suggère des pages d'entreprise à surveiller dans `posts.comptes_suivis`.
+
+    Le collecteur de posts sait déjà relever une page d'entreprise
+    (`compte()`, appelé avant toute recherche parce qu'il coûte une page vue
+    au lieu d'une requête au moteur de contenu). Ce qui manquait, c'est de
+    savoir LESQUELLES suivre. On les déduit de la base : une entreprise qui
+    a déjà publié dix alternances de développement en publiera d'autres.
+
+    Aucune requête réseau — ni LinkedIn, ni ailleurs.
+    """
+    p = cfg.get("posts", {})
+    deja = {c.strip().strip("/").lower() for c in p.get("comptes_suivis", [])}
+
+    employeurs = store.employeurs_recurrents(
+        score_min=args.score_min, minimum=args.minimum, limite=args.limite)
+    if not employeurs:
+        print(f"\n  Aucun employeur avec au moins {args.minimum} alternances "
+              f"à score ≥ {args.score_min}.")
+        print("  Collecte davantage, ou abaisse --score-min / --minimum.\n")
+        return
+
+    connus = store.slugs_linkedin()
+    confirmes, devines = [], []
+    for e in employeurs:
+        slug = connus.get((e["company"] or "").strip().lower())
+        entree = f"company/{slug or _slugifier(e['company'])}"
+        if entree.lower() in deja:
+            continue
+        (confirmes if slug else devines).append((entree, e))
+
+    print(f"\n  {len(confirmes) + len(devines)} employeurs à surveiller "
+          f"(≥ {args.minimum} alternances, score ≥ {args.score_min})")
+    print(f"  {len(deja)} déjà dans comptes_suivis\n")
+
+    if confirmes:
+        print("  SLUG CONFIRMÉ — relevé dans une offre déjà collectée\n")
+        for entree, e in confirmes:
+            print(f'    - "{entree}"'.ljust(46)
+                  + f"# {e['offres']} offres, score moyen {e['moyenne']} "
+                    f"· {e['company'][:32]}")
+        print()
+
+    if devines:
+        print("  SLUG SUPPOSÉ — déduit du nom, À VÉRIFIER avant de l'ajouter :")
+        print("  ouvre la page, le slug est dans l'adresse.\n")
+        for entree, e in devines:
+            print(f'    - "{entree}"'.ljust(46)
+                  + f"# {e['offres']} offres, score moyen {e['moyenne']} "
+                    f"· {e['company'][:32]}")
+        print()
+
+    print("  À recopier sous `posts.comptes_suivis` dans config.yaml.")
+    print("  Une page d'entreprise coûte UNE page vue, là où une recherche")
+    print("  sollicite le moteur de contenu — c'est lui qui fait couper.\n")
+
+
 def cmd_contacts(args, cfg: dict, store: Store) -> None:
     """Toutes les pistes joignables DIRECTEMENT, lien et adresse en clair.
 
@@ -1634,6 +1705,15 @@ def main() -> None:
     cv.add_argument("uid", help="identifiant de l'offre, un bout de son nom, "
                                 "ou l'URL de l'offre (collectée ou non)")
     cv.set_defaults(fn=cmd_cv)
+
+    cp = sub.add_parser("comptes", help="quelles pages d'entreprise surveiller "
+                                        "dans posts.comptes_suivis")
+    cp.add_argument("--score-min", type=int, default=40,
+                    help="score minimum d'une offre pour compter (défaut : 40)")
+    cp.add_argument("--minimum", type=int, default=4, metavar="N",
+                    help="nombre d'alternances pour retenir un employeur (défaut : 4)")
+    cp.add_argument("--limite", type=int, default=30)
+    cp.set_defaults(fn=cmd_comptes)
 
     ct = sub.add_parser("contacts", help="les pistes joignables directement : "
                                          "lien du post et adresse e-mail")

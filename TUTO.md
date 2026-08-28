@@ -345,6 +345,47 @@ Un run relève deux choses :
    qu'il apparaît dans l'URL LinkedIn.
 2. **Les recherches par mots-clés**, plafonnées à 5 par run.
 
+### Qui suivre : `.\radar.ps1 comptes`
+
+Plutôt que de repérer les entreprises une par une dans le digest, cette
+commande les déduit de ta base — une entreprise qui a déjà publié dix
+alternances de développement en publiera d'autres :
+
+```powershell
+.\radar.ps1 comptes                          # employeurs à ≥ 4 offres, score ≥ 40
+.\radar.ps1 comptes --minimum 2 --score-min 20   # plus large
+```
+
+```
+  SLUG SUPPOSÉ — déduit du nom, À VÉRIFIER avant de l'ajouter :
+
+    - "company/worldline"      # 12 offres, score moyen 54 · Worldline
+    - "company/sopra-steria"   # 9 offres, score moyen 59 · Sopra Steria
+    - "company/groupe-sii"     # 5 offres, score moyen 68 · Groupe SII
+```
+
+Aucune requête réseau : tout vient de ce qui est déjà collecté. Deux filtres
+font l'essentiel du travail, et les abaisser dégrade vite la liste :
+
+- **`--score-min`** écarte les employeurs qui publient beaucoup d'alternances
+  mais aucune en développement. Sans lui, le classement est mené par Carrefour
+  et Eiffage Route ;
+- les **écoles et CFA** sont écartés d'office : ils publient pour remplir leurs
+  promotions, pas pour recruter. Talia.fr sortait en tête avec 216 offres.
+
+Deux niveaux de confiance sur le slug, jamais confondus :
+
+- **confirmé** — l'adresse `linkedin.com/company/…` figure noir sur blanc dans
+  une offre déjà collectée ;
+- **supposé** — déduit du nom. « Sopra Steria » donne bien `sopra-steria`, mais
+  « Dassault Systèmes » s'écrit `dassaultsystemes` sans tiret. Ouvre la page
+  une fois, le slug est dans la barre d'adresse.
+
+Pourquoi ne pas vérifier automatiquement : LinkedIn répond `999` à une requête
+anonyme sur une page d'entreprise, et jusqu'à `404` sur un slug pourtant
+valide — vérifié sur `sopra-steria`. Aucun moyen d'en confirmer un sans ouvrir
+la page, et marteler LinkedIn pour deviner est exactement ce qui fait couper.
+
 Les posts de **candidats sont écartés automatiquement** — ce sont tes
 concurrents, pas des employeurs. La distinction se joue à un mot près :
 « recherche une **alternance** » (il en cherche une) contre « recherche un
@@ -543,6 +584,8 @@ rien n'est ajouté à ta base, c'est un aller simple pour un CV.
 .\radar.ps1 mark <uid> <statut> [--notes "…"]
 .\radar.ps1 postuler <uid>                     # pré-remplit le formulaire (n'envoie rien)
 .\radar.ps1 cv <uid>                           # CV LaTeX adapté à l'offre
+.\radar.ps1 comptes [--minimum N] [--score-min N]
+                        # quelles pages d'entreprise suivre dans posts.comptes_suivis
 ```
 
 Options de test, utiles pour vérifier un changement sans lancer un run complet :
