@@ -343,7 +343,26 @@ Un run relève deux choses :
    une page consultée, aucune requête au moteur de recherche. Ajoutes-y ceux que
    tu repères dans le digest, au format `company/<slug>` ou `in/<slug>` tel
    qu'il apparaît dans l'URL LinkedIn.
-2. **Les recherches par mots-clés**, plafonnées à 5 par run.
+2. **Les recherches par mots-clés**, plafonnées à 5 par run — c'est le canal
+   qui balaie *tout* LinkedIn, par opposition aux comptes suivis qui ne voient
+   que les leurs.
+
+   Par défaut le programme reprenait toujours les **5 premiers** mots-clés :
+   sur les 10 configurés, les cinq derniers n'étaient jamais lancés. Avec
+   `posts.rotation_mots_cles: true` (activé), il tourne d'un run à l'autre et
+   couvre les 10 en deux passages. Le nombre de recherches par run ne change
+   pas — seules celles qu'on lance changent, donc **aucun risque de coupure
+   supplémentaire**. Contrepartie : un run sur deux tombe sur les
+   formulations les moins rentables. `false` pour revenir à l'ancien
+   comportement.
+
+> **Pourquoi le balayage large s'arrête à 5 recherches.** C'est la limite de
+> LinkedIn, pas du programme. La recherche de contenu est le seul moyen de
+> voir *tous* les posts, et c'est précisément elle qui se coupe quand on
+> insiste. Les canaux externes ne remplacent pas : testé, DuckDuckGo sert un
+> CAPTCHA, Bing n'indexe aucune URL `/posts/`, et le grounding Google via
+> Gemini épuise son quota. Pour élargir, mieux vaut donc **de meilleurs
+> mots-clés et plus de comptes suivis** que plus de recherches.
 
 ### Qui suivre : `.\radar.ps1 comptes`
 

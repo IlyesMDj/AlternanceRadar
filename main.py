@@ -859,6 +859,9 @@ def cmd_login(args, cfg: dict, store: Store) -> None:
 
 
 JETON_CADENCE = ".derniere_collecte_posts"
+# Où reprendre la rotation des mots-clés au run suivant (voir
+# `_recherches_du_run`). Un simple entier, l'index du prochain départ.
+JETON_ROTATION = ".rotation_mots_cles_posts"
 
 
 def _cadence_posts(cfg: dict, force: bool) -> bool:
@@ -894,6 +897,45 @@ def _cadence_posts(cfg: dict, force: bool) -> bool:
     return True
 
 
+def _recherches_du_run(p: dict) -> list[str]:
+    """Choisit les mots-clés du run, en TOURNANT d'un passage à l'autre.
+
+    Sans rotation, `[:max_recherches_par_run]` prend toujours les mêmes
+    premiers : sur dix mots-clés configurés et un plafond de cinq, les cinq
+    derniers ne sont jamais lancés — jamais, quel que soit le nombre de runs.
+
+    Le plafond, lui, ne bouge pas : c'est l'accumulation de recherches dans
+    une même session qui fait couper LinkedIn, pas leur variété. Cinq
+    recherches restent cinq recherches ; seules celles qu'on lance changent.
+
+    Reste désactivé par défaut : l'ordre des mots-clés est délibéré, les plus
+    rentables d'abord (« alternance développeur » a été mesuré à 11 posts
+    retenus, les formulations en fin de liste à presque rien). Tourner élargit
+    la couverture mais dépense des runs sur des formulations moins sûres —
+    c'est un arbitrage, d'où le réglage explicite.
+    """
+    mots = [str(m).strip() for m in p.get("mots_cles", []) if str(m).strip()]
+    plafond = max(1, int(p.get("max_recherches_par_run", 5)))
+    if not p.get("rotation_mots_cles") or len(mots) <= plafond:
+        return mots[:plafond]
+
+    jeton = RACINE / JETON_ROTATION
+    try:
+        depart = int(jeton.read_text(encoding="utf-8").strip()) % len(mots)
+    except (ValueError, OSError):
+        depart = 0
+
+    choix = [mots[(depart + i) % len(mots)] for i in range(plafond)]
+    try:
+        jeton.write_text(str((depart + plafond) % len(mots)), encoding="utf-8")
+    except OSError as e:
+        # Le tour est perdu, pas le run : on repartira de zéro au suivant.
+        log.warning("rotation non mémorisée (%s)", e)
+    log.info("rotation : mots-clés %d à %d sur %d",
+             depart + 1, depart + plafond, len(mots))
+    return choix
+
+
 def cmd_posts(args, cfg: dict, store: Store) -> None:
     """Collecte les posts du fil LinkedIn (session requise)."""
     from collectors.linkedin_posts import LinkedInPosts
@@ -927,7 +969,7 @@ def cmd_posts(args, cfg: dict, store: Store) -> None:
         taches = [("compte", c) for c in p.get("comptes_suivis", [])]
         # Puis les recherches, plafonnées : c'est leur accumulation, bien
         # plus que le défilement, qui déclenche la coupure.
-        recherches = p.get("mots_cles", [])[: int(p.get("max_recherches_par_run", 5))]
+        recherches = _recherches_du_run(p)
         taches += [("recherche", kw) for kw in recherches]
         log.info("%d comptes suivis + %d recherches (sur %d configurées)",
                  len(p.get("comptes_suivis", [])), len(recherches),

@@ -20,6 +20,11 @@ config.yaml
 cv_source.yaml
 store/cv/
 
+# État local des runs (cadence entre deux collectes, tour de rotation des
+# mots-clés) : propre à cette machine, aucun intérêt à le partager.
+.derniere_collecte_posts
+.rotation_mots_cles_posts
+
 # Données collectées
 store/jobs.db
 store/jobs.db-*
