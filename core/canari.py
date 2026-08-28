@@ -130,6 +130,10 @@ FENETRE_PLEINE = 14
 # pas ses cartes promues, et qu'une fenêtre étroite écarte les offres datées.
 ECHANTILLON_MINIMAL = 25
 
+# Sous ce volume au passage précédent, la comparaison au passé est muette :
+# un écart d'une seule unité produirait « 50 % de moins ». Voir `derive`.
+VOLUME_COMPARABLE = 8
+
 
 @dataclass
 class Constat:
@@ -228,6 +232,13 @@ def derive(db: sqlite3.Connection, constat: Constat, contexte: str = COLLECTE,
 
     Le filtre sur `contexte` est ce qui rend la comparaison honnête : une
     sonde se compare aux sondes, une collecte aux collectes.
+
+    En dessous de `VOLUME_COMPARABLE`, on ne compare pas du tout : un
+    pourcentage n'a aucun sens sur de si petits nombres. Constaté sur
+    `posts_web`, dont un run normal ne retient qu'un ou deux posts — passer
+    de 2 à 1 déclenchait « volume en chute : 50 % de moins » alors qu'un
+    seul post d'écart sépare les deux runs. Le même principe que
+    `ECHANTILLON_MINIMAL` plus haut, appliqué au volume au lieu du taux.
     """
     _preparer(db)
     ligne = db.execute(
@@ -236,6 +247,8 @@ def derive(db: sqlite3.Connection, constat: Constat, contexte: str = COLLECTE,
         (constat.source, contexte),
     ).fetchone()
     if not ligne or not ligne[0]:
+        return None
+    if ligne[0] < VOLUME_COMPARABLE:
         return None
     precedent = ligne[0]
     if constat.nb < precedent * (1 - chute):
