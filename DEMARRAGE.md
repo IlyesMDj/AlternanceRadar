@@ -197,6 +197,7 @@ collectée.
 
 | Symptôme | Cause probable |
 |---|---|
+| **Aucun post dans `serve`** | `serve` affiche les **24 dernières heures** par défaut, or les posts de `posts-web` ont jusqu'à 21 jours. Lance `.\radar.ps1 serve --max-age 21`, ou élargis la fenêtre depuis le panneau de la page. Pour ne voir que les pistes avec contact direct : `.\radar.ps1 contacts` |
 | `Le caractère perluète (&) n'est pas autorisé` | mets le lien entre `"guillemets"` |
 | `cv_source.yaml introuvable` | étape 2 non faite |
 | `posts` refuse de partir | moins de 6 h depuis le dernier run — `--force` pour outrepasser |

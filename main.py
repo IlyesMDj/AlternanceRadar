@@ -1657,6 +1657,16 @@ def cmd_contacts(args, cfg: dict, store: Store) -> None:
     lignes = store.selection(score_min=args.score_min, alternance_seulement=True,
                              limite=400, age_max_heures=fenetre_affichage(args),
                              tri="date")
+    # Les posts sont relevés À PART, pour la même raison que le marché caché
+    # plus bas : ils sont rares et portent presque toujours une adresse, mais
+    # dans la liste commune ils se font sortir par le plafond de 400 trié par
+    # date — un post de dix-sept jours passe derrière des milliers d'annonces
+    # plus récentes, alors que c'est exactement ce que cette commande promet
+    # de montrer. Constaté : `contact@optiago.fr` absent du résultat.
+    lignes = list(lignes) + list(store.selection(
+        score_min=args.score_min, alternance_seulement=True, limite=100,
+        sources=["linkedin_post"], tri="date"))
+
     # Le marché caché n'a pas de date : il sort du filtre de fraîcheur, mais
     # ses 900 téléphones sont justement l'essentiel de ce qu'on cherche ici.
     if not args.sans_marche_cache:
@@ -1664,8 +1674,14 @@ def cmd_contacts(args, cfg: dict, store: Store) -> None:
             score_min=args.score_min, alternance_seulement=True, limite=200,
             sources=["lba_entreprise"], tri="score"))
 
+    # Les trois relevés se recouvrent : un post assez récent figure aussi dans
+    # les 400 premières. Sans dédoublonnage, son adresse s'afficherait deux fois.
+    vus: set[str] = set()
     mails, tels = [], []
     for o in lignes:
+        if o["uid"] in vus:
+            continue
+        vus.add(o["uid"])
         for c in json.loads(o["contacts"] or "[]"):
             (mails if "@" in c else tels).append((c, o))
 
