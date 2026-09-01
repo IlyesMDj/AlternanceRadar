@@ -241,13 +241,29 @@ def cmd_collect(args, cfg: dict, store: Store) -> None:
                     plafond, len(nouveaux), len(nouveaux) - plafond)
 
     # 3. Fiches détaillées, classification, scoring, stockage
-    retenues = 0
+    #
+    # LinkedIn n'a aucun filtre « alternance » : on requête large et 80 % de
+    # ce qui revient n'en est pas. Tout stocker a produit 24 763 lignes pour
+    # 71 offres réellement exploitables — 0,3 % — qui diluent le digest et
+    # pèsent sur chaque commande.
+    #
+    # Le tri se fait donc à l'ENTRÉE. Mesuré avant de trancher : sur les
+    # 4 389 offres LinkedIn ayant une description, 8 seulement (0,2 %)
+    # devaient leur détection à cette description plutôt qu'à leur intitulé,
+    # toutes à score faible. Écarter sur le seul intitulé ne perd donc
+    # presque rien, et `est_alternance` ne dépend pas de config.yaml — un
+    # réglage de poids ne peut pas rendre exploitable ce qu'on a écarté ici.
+    garder_tout = not cfg.get("recherche", {}).get("stocker_alternance_seulement", True)
+    retenues = ecartees = 0
     for i, job in enumerate(nouveaux, 1):
         if i <= plafond:
             job, html = client.detail(job)
             if html:
                 sauver_brut(RACINE / "store" / "raw", "linkedin", job.external_id, html)
         preparer(job)
+        if not (job.is_alternance or garder_tout):
+            ecartees += 1
+            continue
         if store.upsert(job) and job.is_alternance:
             retenues += 1
         if i % 25 == 0:
@@ -273,6 +289,9 @@ def cmd_collect(args, cfg: dict, store: Store) -> None:
             store.upsert(preparer(job))
 
     client.close()
+    if ecartees:
+        log.info("%d offres écartées à l'entrée (pas de marqueur d'alternance)",
+                 ecartees)
     log.info("terminé — %d nouvelles alternances retenues", retenues)
     cmd_stats(args, cfg, store)
 

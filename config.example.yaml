@@ -143,6 +143,17 @@ recherche:
   # via le texte des offres (bonus "télétravail" plus bas).
   inclure_remote: false
 
+  # N'ENREGISTRER QUE LES ALTERNANCES (collecte LinkedIn).
+  # LinkedIn n'a aucun filtre « alternance » : on requête large et 80 % de ce
+  # qui revient n'en est pas. Tout stocker avait produit 24 763 lignes pour
+  # 71 offres exploitables — 0,3 % — qui diluent le digest et alourdissent
+  # chaque commande.
+  # Mesuré avant d'activer : sur les 4 389 offres LinkedIn ayant une
+  # description, 8 seulement (0,2 %) devaient leur détection à celle-ci
+  # plutôt qu'à leur intitulé, toutes à score faible.
+  # `false` pour revenir à l'ancien comportement et tout conserver.
+  stocker_alternance_seulement: true
+
   # Fenêtre temporelle en heures. 336 h = 2 semaines : au-delà, une offre
   # d'alternance est le plus souvent déjà pourvue ou en fin de processus.
   fenetre_heures: 336

@@ -104,7 +104,14 @@ ATTENDUS: dict[str, dict] = {
     # Flux RSS complet, non filtré : le volume mesure tout le board IT, pas
     # seulement l'alternance. `contract_type` en est absent par construction
     # (classify.py tranche sur le titre) et n'est donc pas exigé ici.
-    "devitjobs":      {"min": 80, "champs": ("title", "company", "url",
+    #
+    # Seuil ramené de 80 à 1 : le board s'est VIDÉ, ce n'est pas le parseur.
+    # Relevé jour après jour sur le flux brut — 154 offres le 25/08, puis 77,
+    # 75, 68, 7, et 3 le 31/08, avec un `lastBuildDate` du jour à chaque fois.
+    # Le seuil de 80 faisait donc sonner l'alerte à chaque run pour un site
+    # qui répond parfaitement. Il ne reste à surveiller que la rupture franche
+    # du flux, d'où 1 — la complétude des champs, elle, garde tout son sens.
+    "devitjobs":      {"min": 1,  "champs": ("title", "company", "url",
                                              "posted_at")},
     # Facet serveur sur un board de niche : le volume national mesuré est de
     # 1 à 2 offres. Le seuil vise la rupture du filtre, pas un volume — en
