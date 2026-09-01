@@ -542,14 +542,45 @@ class LinkedInPosts:
                 trouves.setdefault(job.external_id, job)
 
         relever()
+
+        # Le curseur est placé au CENTRE de la fenêtre avant de faire tourner
+        # la molette. `mouse.wheel` agit là où le curseur se trouve, et
+        # Playwright le laisse en (0, 0) tant qu'on ne l'a pas bougé : depuis
+        # le coin supérieur gauche, l'événement peut atterrir sur la barre
+        # latérale — qui a son propre défilement — au lieu du fil.
+        taille = self.page.viewport_size or {"width": 1280, "height": 800}
+        milieu = (taille["width"] // 2, taille["height"] // 2)
+
+        steriles = 0
+        paliers = 1
         for _ in range(defilements):
+            avant, hauteur = len(trouves), self.page.evaluate("window.scrollY")
+
+            self.page.mouse.move(*milieu)
             # Pas plus d'un écran à la fois, pour ne rien enjamber.
             self.page.mouse.wheel(0, random.randint(500, 800))
             time.sleep(random.uniform(1.4, 2.6))
             relever()
+            paliers += 1
+
+            # Rien de neuf ET la page n'a pas bougé : on est au bas de ce que
+            # LinkedIn a chargé. On lui laisse une seconde chance — le fil
+            # charge la suite en différé, un premier palier stérile ne veut
+            # pas dire que c'est fini — puis on s'arrête. Continuer à faire
+            # défiler une liste épuisée ne rapporte rien et ressemble
+            # précisément à ce qu'un détecteur cherche.
+            if len(trouves) == avant and self.page.evaluate("window.scrollY") <= hauteur:
+                steriles += 1
+                if steriles >= 2:
+                    log.info("%s → bas de liste atteint au palier %d",
+                             etiquette, paliers)
+                    break
+                time.sleep(random.uniform(1.5, 2.5))
+            else:
+                steriles = 0
 
         log.info("%s → %d posts retenus après %d paliers",
-                 etiquette, len(trouves), defilements + 1)
+                 etiquette, len(trouves), paliers)
         return list(trouves.values())
 
     def _extraire(self, age_max_jours: int) -> list[Job]:

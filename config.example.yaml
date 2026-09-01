@@ -435,7 +435,12 @@ posts:
 
   fenetre: "past-month"     # past-24h | past-week | past-month
   age_max_jours: 14         # filtrage après coup sur la date affichée
-  defilements: 6            # volontairement bas : un scroll infini se repère
+  # Plafond de paliers de défilement, pas un objectif : la collecte s'arrête
+  # d'elle-même dès que deux paliers de suite ne rapportent rien et que la
+  # page ne bouge plus. Relevé de 6 à 10 une fois cet arrêt en place — sur un
+  # fil épuisé le run défile maintenant MOINS qu'avant, et sur un fil fourni
+  # il va enfin au bout. Un défilement sans fin reste ce qui se repère.
+  defilements: 10
   delai: 4.0                # secondes entre deux actions
 
   # GARDE-FOUS — appris à la dure le 13/08/2026. Quatre collectes en vingt
