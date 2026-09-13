@@ -1,0 +1,25 @@
+# Dépendances d'exécution — versions figées sur l'environnement vérifié.
+#
+#   python -m venv .venv
+#   .venv\Scripts\python.exe -m pip install -r requirements.txt
+#   .venv\Scripts\python.exe -m playwright install chrome
+#
+# Pourquoi figer : la valeur du projet tient à des parseurs de HTML tiers.
+# Une montée de version de lxml ou de bs4 qui change la tolérance aux
+# balises mal fermées casse un collecteur en silence — exactement la panne
+# que core/canari.py existe pour attraper. Autant ne pas la provoquer.
+
+# --- cœur : collecte et analyse -----------------------------------------
+httpx==0.28.1              # sources sans protection TLS (LinkedIn, HelloWork)
+curl_cffi==0.16.3          # empreinte TLS Chrome — Indeed, Glassdoor, WTTJ...
+beautifulsoup4==4.15.0
+lxml==6.1.3                # parseur de bs4, et mode XML pour le RSS de PASS
+PyYAML==6.0.3              # config.yaml, cv_source.yaml
+
+# --- optionnel : posts LinkedIn (main.py posts / posts-web) -------------
+# Seule partie qui ouvre un navigateur. Le reste du projet tourne sans.
+playwright==1.62.0
+
+# --- optionnel : accroche du CV (main.py cv, si GEMINI_API_KEY) ---------
+# Sans la clé, ou sans ce paquet, le CV se génère simplement sans accroche.
+google-genai==2.22.0

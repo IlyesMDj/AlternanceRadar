@@ -12,7 +12,21 @@ d'œil où en est chaque candidature.
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install httpx curl_cffi beautifulsoup4 lxml pyyaml playwright google-genai
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m playwright install chrome    # posts LinkedIn uniquement
+```
+
+Les versions sont **figées** dans `requirements.txt`. Ce n'est pas de la
+prudence de principe : la valeur du projet tient à des parseurs de HTML tiers,
+et une montée de version de `lxml` ou de `bs4` qui change la tolérance aux
+balises mal fermées casse un collecteur en silence — exactement la panne que
+`core/canari.py` existe pour attraper.
+
+Pour développer et lancer les tests :
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest
 ```
 
 ## Utilisation
@@ -80,6 +94,8 @@ large puis de filtrer localement sur les marqueurs textuels (`alternance`,
 `alternant`, `apprentissage`, `contrat de professionnalisation`, `work-study`…).
 
 ```
+collectors/http.py             throttling, backoff, disjoncteur — partagé
+        ↑
 collectors/linkedin_guest.py   offres LinkedIn, sans authentification
 collectors/hellowork.py        offres HelloWork, filtre c=Alternance natif
 collectors/linkedin_posts.py   posts du fil, session Chrome dédiée
@@ -89,6 +105,104 @@ core/score.py                  score de pertinence vs config.yaml
 core/store.py                  SQLite + suivi de candidature
 report.py                      digest HTML trié par score
 ```
+
+**Un seul client HTTP pour dix collecteurs.** Chacun réécrivait son propre
+throttling et son propre retry, à des constantes près — et le coût n'était pas
+la longueur, c'était que les corrections ne circulaient pas : le disjoncteur
+« 3 refus consécutifs », écrit pour Indeed après s'être fait couper le
+15/08/2026, n'avait jamais atteint HelloWork ni LinkedIn. Deux axes de
+variation suffisent à les couvrir tous : le transport (`curl_cffi` pour les
+sources qui détectent l'empreinte TLS, `httpx` pour les autres) et la
+politique de refus (codes, patience, seuil du disjoncteur), tous deux
+paramètres et non `if` recopiés.
+
+La Bonne Alternance reste dehors, délibérément : c'est une API authentifiée
+qui publie son quota en en-tête, dicte ses pauses par `retry-after`, et dont
+le 403 signifie « clé refusée » et non « refus temporaire ». Trois règles
+incompatibles avec celles des sites qu'on interroge sans qu'ils nous doivent
+quoi que ce soit.
+
+### Ce que ces corrections ont changé, mesuré
+
+Toutes les valeurs sont relevées sur la base réelle, avant/après `rescore`.
+
+| | avant | après |
+|---|---|---|
+| Offres taguées « rythme 3/1 » | **0** | **32** |
+| Offres à score ≥ 40 | 107 | 122 |
+| Offres avec un contact e-mail direct | 23 | **56** |
+| Stages purs dans le digest | 29, dont **les 4 premiers** | 0 |
+| Offres republiées par un intermédiaire | 16 | 0 |
+| Écoles non détectées (Mewo, Coda, SKILLIE…) | 30 | 0 |
+| Taille de la base | 17,3 Mo / 4 219 lignes | **9,1 Mo / 2 312** |
+
+Le digest ouvrait sur quatre stages en défense republiés par un organisateur
+de salons. Il ouvre maintenant sur des alternances de développement chez
+Betclic, Worldline, Webnet et Corys.
+
+### Tests
+
+`pytest`, sans réseau : la suite ne sort jamais sur Internet, sinon elle
+échouerait les jours où LinkedIn tousse et deviendrait du bruit qu'on apprend
+à ignorer. Le client HTTP est exercé contre un double qui rejoue une séquence
+de codes ; le reste est du code pur.
+
+Les cas testés ne sont pas inventés : ce sont ceux que les docstrings du
+projet documentent déjà comme des pannes réelles — « Data scientist (F/H) »
+contre « Data Scientist H/F », « 75010 Paris » contre « Paris »,
+« apprentissage automatique » qui n'est pas de l'alternance, les 363 offres
+HelloWork exclues d'un coup par un menu déroulant lu comme une déclaration de
+contrat.
+
+Deux bugs ont été trouvés en les écrivant, tous deux invisibles à l'œil :
+
+- **l'écriture inclusive n'était traitée qu'à moitié.** `_INCLUSIF` listait
+  ses suffixes dans l'ordre de déclaration, or l'alternance de `re` rend le
+  PREMIER motif qui matche, pas le plus long : « (se) » était mangé par
+  l'alternative « s » seule, qui laissait « e) » derrière elle.
+  « Développeur(se) » devenait `developpeure`, « Développeur(euse) » devenait
+  `developpeuruse` — ni l'un ni l'autre ne matche « developpeur ». **47 offres
+  de la base**, toutes des postes de développement, perdaient ainsi leurs
+  +20 « poste technique ». Corrigé en triant les suffixes du plus long au plus
+  court ;
+- **la détection de rythme ne pouvait jamais se déclencher.** `_RYTHME`
+  exigeait un séparateur `/` ou `-` entre les deux membres, mais tourne sur
+  `job.haystack`, c'est-à-dire sur du texte déjà passé par `normalize()` —
+  qui remplace justement ces caractères par une espace. Zéro offre taguée
+  « rythme 3/1 » sur 4 171, alors que 37 l'annoncent dans leur description.
+  Le bonus et le malus des rythmes incompatibles n'avaient jamais rien fait.
+
+### Le rythme, refait
+
+Le corriger a suffi à passer de 0 à 3 offres détectées. Trois, sur un critère
+que ce README qualifie de plus discriminant du profil : le motif était juste,
+mais il exigeait l'ADJACENCE des deux membres. Or personne n'écrit
+« 3 semaines 1 semaine » — on écrit « 3 semaines **en entreprise** 1 semaine
+**à l'école** ». Quatre changements, chacun mesuré :
+
+- **cinq mots tolérés** entre les membres : 3 → 18 offres ;
+- **un marqueur de contexte exigé** (le mot « rythme » à proximité, ou une
+  mention entreprise/école accrochée aux membres). Sans lui la tolérance
+  dérive : « 1 jour de télétravail par semaine, congés 1 jour par mois » se
+  lisait comme un rythme 1/1. « alternance » ne convient pas comme marqueur,
+  bien que tentant — il figure dans presque tous les intitulés, donc une
+  garde que le titre satisfait tout seul ;
+- **le sens de lecture redressé** : une annonce sur trois écrit l'école en
+  premier, et « 1 semaine formation, 3 semaines entreprise » était compté
+  comme un 1/3. Le meilleur rythme du profil comptait comme le pire ;
+- **le meilleur rythme proposé l'emporte** sur le premier cité : six offres
+  écrivent « 4 jours / 1 jour OU 3 semaines / 1 semaine ».
+
+Total : **32 offres en 3/1**, contre 0 avant correction. Et l'unité compte
+autant que le ratio — relevé sur la base, « 3/1 » est toujours écrit en
+semaines, « 4/1 » et « 3/2 » toujours en jours. Un rythme journalier suppose
+d'être à l'école chaque semaine, ce qu'un cursus en blocs de trois semaines
+ne permet pas : il est donc pénalisé, même quand son ratio flatte.
+
+Les deux règles de `config.yaml` qui doublaient ce bloc ont été retirées. La
+positive matchait « 3 semaines » n'importe où — donc « 3 semaines de congés »
+— et n'apportait que **3 offres** au-delà de celles vues ici, toutes
+douteuses. Leur poids est reversé à la détection structurée.
 
 ### Sources
 
@@ -349,6 +463,18 @@ Trois détails de conception qui comptent :
 | …et faire confiance à ce champ le rendait auto-confirmant | `annotate` n'écrit plus jamais dans `contract_type` |
 | `Data scientist (F/H) - alternance` ≠ `Data Scientist - Alternance H/F` : la même offre AXA en double | clé de dédoublonnage sur l'ensemble **trié** des mots, jetons d'une lettre retirés (`h`, `f`, le `e` d'`Apprenti(e)`) |
 | LinkedIn écrit `Nanterre, Île-de-France`, HelloWork `Nanterre - 92` | `city_of` découpe sur les deux séparateurs et retire les arrondissements |
+| `Développeur(se)` devenait `developpeure` : l'alternance de `re` rend le premier motif, pas le plus long | suffixes inclusifs triés du plus long au plus court dans `_INCLUSIF` |
+| `_RYTHME` exigeait un `/` que `normalize()` avait déjà remplacé par une espace | séparateur rendu optionnel ; l'adjacence des deux membres tient les faux positifs |
+| Le tri « alternance seulement » ne s'appliquait qu'à LinkedIn, alors que DevITjobs stockait 1 802 lignes pour 109 alternances | `garder()`, une règle unique pour toutes les sources, dérogeable par source |
+| Les quatre premières places du digest étaient des **stages**, pas des alternances | `stage_sans_alternance` : l'intitulé fait foi, « Stage / Alternance » épargné |
+| Un organisateur de forums republiait 16 offres sous SA raison sociale, cassant dédoublonnage et candidature | secteur `intermediaires` |
+| « 3 semaines entreprise **1 semaine école** » : le rythme n'était jamais vu, faute de tolérance aux mots intercalés | 5 mots tolérés + marqueur de contexte exigé |
+| « 1 semaine formation, 3 semaines entreprise » comptait comme un 1/3 | redressement école/entreprise : c'est un 3/1 |
+| « 4 jours / 1 jour **ou 3 semaines / 1 semaine** » : seul le premier rythme était lu | le plus favorable l'emporte |
+| Un rythme en JOURS est incompatible avec un cursus en blocs de 3 semaines | l'unité est détectée, pas seulement le ratio |
+| `…@monext.net.` **Dans** notre équipe → `@monext.net.dans` | le point du domaine n'accepte plus d'espace autour de lui |
+| Les e-mails n'étaient cherchés que dans les posts LinkedIn | `core/contacts.py`, appliqué à toutes les sources |
+| Le rattrapage des descriptions ne recevait que le reste du budget, soit rien les jours chargés | `part_backlog` : une part réservée, plancher et non plafond |
 
 Le dédoublonnage inter-sources est passé de 5 à **45 doublons** grâce à ces deux
 dernières corrections. `rescore` recalcule aussi les clés et re-marque les

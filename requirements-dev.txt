@@ -1,0 +1,8 @@
+# Outillage de développement — pas nécessaire pour faire tourner le radar.
+#
+#   .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+#   .venv\Scripts\python.exe -m pytest
+
+-r requirements.txt
+
+pytest==9.1.1
