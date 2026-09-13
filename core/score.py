@@ -6,7 +6,8 @@ quotidien pour que les offres les plus pertinentes remontent en tête.
 
 from __future__ import annotations
 
-from .classify import niveau_detecte, rythme_detecte
+from .classify import (niveau_detecte, rythme_compatible,
+                       rythme_detecte)
 from .models import (Job, compiler_motifs as _compiler, normalize,
                      normalize_intitule)
 
@@ -89,16 +90,28 @@ class Scorer:
             detail.append(f"{self.poids_ecole} école/CFA, pas un employeur")
             tags.append("⚠ école/CFA")
 
-        # Le rythme annoncé prime sur la simple présence du motif : un 3/1
-        # explicite est le critère le plus discriminant du profil.
+        # Le rythme est le critère le plus discriminant du profil : le cursus
+        # impose des blocs de trois semaines, et une offre qui ne peut pas les
+        # accueillir ne se rattrapera pas sur sa pile technique.
+        #
+        # Les deux règles de `config.yaml` qui doublaient ce bloc ont été
+        # retirées : la positive matchait « 3 semaines » n'importe où (donc
+        # « 3 semaines de congés »), et n'apportait que 3 offres au-delà de
+        # celles vues ici — toutes douteuses. Le poids qu'elles portaient est
+        # reversé ici, où la détection est structurée.
+        #
+        # L'ABSENCE de rythme annoncé ne vaut rien, ni bonus ni malus : c'est
+        # le cas de 1 087 offres sur 1 139, et ne rien dire n'est pas dire non.
         rythme = rythme_detecte(job)
-        if rythme == "3/1":
-            total += 10
-            detail.append("+10 rythme 3/1 confirmé")
+        compatible = rythme_compatible(job)
+        if compatible:
+            total += 15
+            detail.append("+15 rythme 3/1 confirmé")
             tags.append("rythme 3/1")
-        elif rythme in ("1/1", "2/3", "3/2"):
-            total -= 10
-            detail.append(f"-10 rythme {rythme} incompatible")
+        elif compatible is False:
+            total -= 15
+            detail.append(f"-15 rythme {rythme} incompatible")
+            tags.append(f"⚠ rythme {rythme}")
 
         niveau = niveau_detecte(job)
         if niveau == "Bac+4 / M1":

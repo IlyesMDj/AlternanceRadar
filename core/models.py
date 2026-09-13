@@ -26,8 +26,26 @@ def normalize(text: str) -> str:
 
 
 # Formes inclusives : « Chargé(e) », « Développeur(se) », « Apprenti·e ».
-_INCLUSIF = re.compile(r"[(·•](?:e|s|se|ses|trice|trices|euse|euses|ne|nes|ive|ives|ère|ere)\)?",
-                       re.IGNORECASE)
+_SUFFIXES_INCLUSIFS = ("e", "s", "se", "ses", "trice", "trices", "euse",
+                       "euses", "ne", "nes", "ive", "ives", "ère", "ere")
+
+# TRIÉS DU PLUS LONG AU PLUS COURT, et ça n'est pas cosmétique : l'alternance
+# de `re` rend le PREMIER motif qui matche, jamais le plus long. Dans l'ordre
+# de déclaration, « (se) » était mangé par l'alternative « s » seule, qui
+# laissait « e) » derrière elle — « Développeur(se) » devenait
+# « developpeure », et « Développeur(euse) » devenait « developpeuruse ».
+# Ni l'un ni l'autre ne matche alors le motif « developpeur » du gate métier :
+# 47 offres de la base, toutes des postes de développement, perdaient leur
+# bonus « poste technique ». Même famille de panne que le « Chargé(e) »
+# documenté sous `normalize_intitule`, et invisible pour la même raison —
+# le titre reste lisible à l'œil, seul le matching casse.
+#
+# Ajouter un suffixe ici se fait dans le tuple ci-dessus, jamais dans le
+# motif : le tri est ce qui garantit la correction.
+_INCLUSIF = re.compile(
+    r"[(·•](?:%s)\)?" % "|".join(sorted(_SUFFIXES_INCLUSIFS,
+                                        key=len, reverse=True)),
+    re.IGNORECASE)
 
 
 def normalize_intitule(titre: str) -> str:

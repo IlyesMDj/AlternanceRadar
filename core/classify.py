@@ -29,7 +29,56 @@ _FAUX_AMIS = re.compile(
 )
 
 # Rythmes d'alternance, pour affichage et pour le scoring.
-_RYTHME = re.compile(r"\b(\d)\s*(?:semaines?|sem\.?|j(?:ours?)?)\s*[/\-]\s*(\d)\s*(?:semaines?|sem\.?|j(?:ours?)?)\b")
+#
+# Trois propriétés, chacune payée par un cas réel de la base :
+#
+# 1. **Le séparateur est optionnel.** Ce motif tourne sur `job.haystack`, donc
+#    sur du texte déjà passé par `normalize()` — qui remplace « / » et « - »
+#    par une espace. En l'exigeant, le motif ne matchait AUCUNE offre :
+#    « Rythme 3 semaines / 1 semaine » arrive ici en « rythme 3 semaines
+#    1 semaine ». 0 offre taguée sur 4 171, alors que 37 l'annonçaient.
+#
+# 2. **Jusqu'à cinq mots entre les deux membres.** La formulation réelle n'est
+#    presque jamais « 3 semaines 1 semaine » mais « 3 semaines EN ENTREPRISE
+#    1 semaine À L'ÉCOLE ». Exiger l'adjacence ne voyait que 3 offres en 3/1 ;
+#    la tolérance en voit 24.
+#
+# 3. **Un marqueur de contexte est exigé** — « rythme », « alternance »… dans
+#    les 60 caractères qui précèdent, ou entre les deux membres. C'est ce qui
+#    empêche la tolérance de dériver : sans lui, « 1 jour de télétravail par
+#    semaine, congés 1 jour par mois » était lu comme un rythme 1/1.
+_UNITE = r"(?:semaines?|sem\.?|s|j(?:ours?)?)"
+
+# Sens de lecture. Une annonce sur trois écrit l'école en premier — « 1 semaine
+# de formation théorique, 3 semaines en entreprise » est un 3/1, pas un 1/3.
+# Sans ce redressement, le meilleur rythme du profil était compté comme le pire.
+_ECOLE = re.compile(r"\b(?:ecole|formation|cours|universite|fac|centre|"
+                    r"theorique|campus|cfa)\b")
+_ENTREPRISE = re.compile(r"\b(?:entreprise|societe|agence|terrain|"
+                         r"operationnel|mission|bureau)\b")
+_CONTEXTE = re.compile(r"\brythmes?\b")
+
+_RYTHME = re.compile(
+    rf"\b(\d)\s*{_UNITE}\b(?P<milieu>(?:\W+\w+){{0,5}}?)\W+\b(\d)\s*{_UNITE}\b"
+    # `apres` est une ANTICIPATION : il regarde sans consommer. Consommer
+    # trois mots faisait avaler le « ou 3 semaines » de « 4 jours / 1 jour ou
+    # 3 semaines / 1 semaine », et le second rythme — le bon — disparaissait
+    # du balayage.
+    rf"(?=(?P<apres>(?:\W+\w+){{0,3}}))")
+
+# Ordre de préférence quand une annonce en propose plusieurs. Six offres de la
+# base écrivent « 4 jours / 1 jour OU 3 semaines / 1 semaine » : ne lire que la
+# première les classait en 4/1 alors que le rythme voulu est disponible.
+_PREFERENCE = {"3/1": 0, "4/1": 1}
+
+# L'unité n'est pas un détail d'affichage : elle décide de la compatibilité.
+# Relevé sur la base, le clivage est net — « 3/1 » est TOUJOURS écrit en
+# semaines (26 occurrences), « 4/1 » et « 3/2 » TOUJOURS en jours (20 et 8).
+# Or un rythme journalier suppose d'être à l'école chaque semaine, ce qu'un
+# cursus organisé en blocs de trois semaines ne permet pas. Une offre qui
+# n'annonce qu'un rythme en jours n'est donc pas jouable, même si le ratio
+# ressemble à celui qu'on cherche.
+_JOURS = re.compile(r"\d\s*j")
 
 
 # Longueur de l'« accroche » : le début de la description, où une offre
@@ -69,10 +118,52 @@ def est_alternance(job: Job) -> bool:
     return bool(_MARQUEURS.search(_FAUX_AMIS.sub(" ", f" {accroche} ")))
 
 
+def _rythmes_annonces(texte: str) -> list[tuple[str, str]]:
+    """Tous les rythmes annoncés, en (ratio, unité), dans l'ordre de lecture.
+
+    Chaque occurrence est redressée pour que le premier membre soit toujours
+    l'entreprise : « 1 semaine école 3 semaines entreprise » ressort en 3/1.
+    """
+    trouves: list[tuple[str, str]] = []
+    for m in _RYTHME.finditer(f" {texte} "):
+        a, b = int(m.group(1)), int(m.group(3))
+        milieu, apres = m.group("milieu"), m.group("apres")
+        avant = texte[max(0, m.start() - 60):m.start()]
+        if not (_CONTEXTE.search(avant)
+                or _ECOLE.search(milieu) or _ENTREPRISE.search(milieu)
+                or _ECOLE.search(apres) or _ENTREPRISE.search(apres)):
+            continue
+        if _ECOLE.search(milieu) and (_ENTREPRISE.search(apres)
+                                      or not _ENTREPRISE.search(milieu)):
+            a, b = b, a
+        unite = "jours" if _JOURS.search(m.group(0)) else "semaines"
+        trouves.append((f"{a}/{b}", unite))
+    return trouves
+
+
 def rythme_detecte(job: Job) -> str | None:
-    """Extrait un rythme du type « 3 semaines / 1 semaine » s'il est annoncé."""
-    m = _RYTHME.search(f" {job.haystack} ")
-    return f"{m.group(1)}/{m.group(2)}" if m else None
+    """Le rythme le plus favorable annoncé par l'offre, s'il y en a un.
+
+    « Le plus favorable » et non « le premier » : une annonce qui propose
+    « 4 jours / 1 jour ou 3 semaines / 1 semaine » offre bien le 3/1, et le
+    classer en 4/1 sur le seul ordre des mots serait une perte sèche.
+    """
+    trouves = [r for r, _ in _rythmes_annonces(job.haystack)]
+    if not trouves:
+        return None
+    return min(trouves, key=lambda r: (_PREFERENCE.get(r, 9), trouves.index(r)))
+
+
+def rythme_compatible(job: Job) -> bool | None:
+    """Le rythme annoncé est-il tenable avec un cursus en blocs de 3 semaines ?
+
+    None quand l'offre n'annonce rien — l'immense majorité, et surtout pas une
+    raison de pénaliser : ne rien dire n'est pas dire non.
+    """
+    annonces = _rythmes_annonces(job.haystack)
+    if not annonces:
+        return None
+    return any(ratio == "3/1" and unite == "semaines" for ratio, unite in annonces)
 
 
 def niveau_detecte(job: Job) -> str | None:

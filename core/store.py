@@ -279,9 +279,14 @@ class Store:
             (source, self.SEUIL_DESCRIPTION, limite),
         ).fetchall()
         return [
+            # `contacts` est rechargé bien que la description soit vide : le
+            # pipeline en fait l'UNION avec ce qu'il trouve dans la fiche
+            # fraîchement récupérée, et `maj_description` réécrit la colonne.
+            # Repartir d'une liste vide effacerait une adresse déjà connue.
             Job(source=r["source"], external_id=r["external_id"], title=r["title"],
                 company=r["company"] or "", location=r["location"] or "",
-                url=r["url"] or "", contract_type=r["contract_type"])
+                url=r["url"] or "", contract_type=r["contract_type"],
+                contacts=json.loads(r["contacts"] or "[]"))
             for r in rows
         ]
 
@@ -323,11 +328,19 @@ class Store:
         return cur.rowcount
 
     def maj_score(self, job: Job) -> None:
-        """Met à jour uniquement les champs calculés."""
+        """Met à jour uniquement les champs calculés.
+
+        `contacts` en fait partie : le pipeline les extrait de la description,
+        c'est donc une donnée DÉRIVÉE au même titre que le score, et `rescore`
+        doit pouvoir la recalculer. Sans elle ici, améliorer l'extraction ne
+        servait à rien sur la base existante — il aurait fallu re-collecter
+        toutes les offres pour en voir l'effet.
+        """
         self.db.execute(
             "UPDATE jobs SET score = ?, score_detail = ?, tags = ?, "
-            "is_alternance = ?, exclu = ? WHERE uid = ?",
+            "contacts = ?, is_alternance = ?, exclu = ? WHERE uid = ?",
             (job.score, job.score_detail, json.dumps(job.tags, ensure_ascii=False),
+             json.dumps(job.contacts, ensure_ascii=False),
              int(job.is_alternance), job.exclu, job.uid),
         )
 
@@ -337,15 +350,26 @@ class Store:
         Le compteur d'essais est incrémenté même en cas d'échec : une offre
         expirée (404) sort du backlog au bout de trois tentatives au lieu de
         le bloquer indéfiniment.
+
+        Écrit TOUT ce que la description vient de révéler, `contacts` et
+        `exclu` compris. Les oublier était sans conséquence visible — le
+        prochain `rescore` les recalculait — mais laissait la base incohérente
+        entre deux runs : une offre dont la fiche annonce « Type de contrat :
+        CDI » restait affichée au digest, et une adresse de candidature
+        trouvée dans cette même fiche était purement perdue.
         """
         self.db.execute(
             """UPDATE jobs SET description = ?, contract_type = ?, tags = ?,
-                               score = ?, score_detail = ?, is_alternance = ?,
+                               contacts = ?, score = ?, score_detail = ?,
+                               is_alternance = ?, exclu = ?,
                                last_seen = ?, detail_essais = detail_essais + 1
                WHERE uid = ?""",
             (job.description, job.contract_type,
-             json.dumps(job.tags, ensure_ascii=False), job.score, job.score_detail,
-             int(job.is_alternance), datetime.now().isoformat(timespec="seconds"),
+             json.dumps(job.tags, ensure_ascii=False),
+             json.dumps(job.contacts, ensure_ascii=False),
+             job.score, job.score_detail,
+             int(job.is_alternance), job.exclu,
+             datetime.now().isoformat(timespec="seconds"),
              job.uid),
         )
         self.db.commit()

@@ -40,6 +40,28 @@ _NAF = re.compile(r"\((\d{4}[A-Z])\)")
 # La présentation ouvre l'annonce ; au-delà, on lit le poste, pas l'employeur.
 ENTETE = 1500
 
+# Stage, et rien d'autre, dans l'intitulé.
+#
+# 29 offres de la base portaient « Stage » en titre sans la moindre mention
+# d'alternance — et occupaient les QUATRE premières places du digest (103,
+# 97, 78, 70). Elles passaient parce que `est_alternance` fait confiance au
+# `contract_type` de la source, et qu'Indeed y recopie « stage apprentissage
+# contrat d'apprentissage » : le menu de filtres coché par l'employeur, pas
+# une déclaration. Exactement le piège déjà documenté pour le formulaire
+# d'alerte HelloWork, qui avait fait exclure ses 363 offres d'un coup.
+#
+# Leurs descriptions mentionnent bien « alternance », mais toujours comme une
+# PERSPECTIVE : « à l'issue », « possibilité de continuer en », « stage M2
+# suivi d'une alternance ». Chercher le mot dans le texte ne tranche donc
+# rien — l'intitulé, lui, dit ce que l'employeur a mis au recrutement.
+#
+# Le titre qui annonce les deux (« Stage / Alternance ») ne déclenche pas :
+# 33 offres sont dans ce cas, ce sont de vraies doubles opportunités.
+_STAGE = re.compile(r"\b(?:stage|stagiaire|internship|intern)s?\b")
+_ALTERNANCE = re.compile(
+    r"\b(?:alternance|alternant\w*|apprentissage|apprenti\w*"
+    r"|contrat pro\w*|professionnalisation|work.study|apprenticeship)\b")
+
 # Déclaration EXPLICITE d'un type de contrat. Volontairement exigeante : le
 # simple mot « CDI » dans une description ne prouve rien — « possibilité de CDI
 # à l'issue de l'alternance » est un argument de vente, pas un type de contrat.
@@ -73,15 +95,19 @@ class Exclusions:
             for nom, regle in (bloc.get("metiers") or {}).items()
         }
         # Types de contrat écartés.
-        self.contrats = compiler_motifs(
-            (bloc.get("contrats") or {}).get("exclus") or []
-        )
+        contrats = bloc.get("contrats") or {}
+        self.contrats = compiler_motifs(contrats.get("exclus") or [])
+        self.stage_seul = bool(contrats.get("stage_sans_alternance", True))
         # Courtage scolaire : deux familles de marqueurs, exigées ensemble.
         courtage = bloc.get("courtage_ecole") or {}
         self.ecole_dit = compiler_motifs(courtage.get("marqueurs_ecole") or [])
         self.courtage_dit = compiler_motifs(courtage.get("marqueurs_courtage") or [])
         # Contre-exemples, prioritaires sur toute exclusion.
         self.exceptions = compiler_motifs(bloc.get("exceptions") or [])
+        # `stage_seul` n'entre PAS dans ce calcul, comme `_CONTRAT_DECLARE`
+        # plus bas : ce sont des règles codées en dur, actives par défaut,
+        # mais qui ne doivent pas à elles seules réveiller un filtre qu'aucune
+        # configuration n'a demandé. Sans config, on n'exclut rien.
         self.actif = bool(self.secteurs or self.naf or self.metiers
                           or self.contrats or self.ecole_dit)
 
@@ -123,6 +149,9 @@ class Exclusions:
                     return nom
             if self.contrats and self.contrats.search(titre):
                 return "contrat hors alternance"
+            if (self.stage_seul and _STAGE.search(titre)
+                    and not _ALTERNANCE.search(titre)):
+                return "stage (sans alternance)"
 
         # Type de contrat déclaré explicitement dans la description.
         declare = _CONTRAT_DECLARE.search(normalize(job.description or ""))
