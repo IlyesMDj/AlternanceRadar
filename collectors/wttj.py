@@ -41,14 +41,12 @@ from __future__ import annotations
 import html
 import json
 import logging
-import random
 import re
-import time
 from datetime import date, datetime
 
-from curl_cffi import requests as cffi
-
 from core.models import Job, horodatage
+
+from .http import EMPREINTE, Blocage, ClientSource
 
 log = logging.getLogger("wttj")
 
@@ -61,7 +59,6 @@ INDEX = "wk_cms_jobs_production"
 RECHERCHE = f"https://{APP_ID.lower()}-dsn.algolia.net/1/indexes/{INDEX}/query"
 DETAIL = "https://api.welcometothejungle.com/api/v1/organizations/{org}/jobs/{slug}"
 FICHE = "https://www.welcometothejungle.com/fr/companies/{org}/jobs/{slug}"
-EMPREINTE = "chrome124"
 
 # Sans Referer/Origin, la clé est refusée : elle est restreinte au domaine.
 HEADERS = {
@@ -164,55 +161,24 @@ def _liste(valeur) -> str:
 
 class WelcomeToTheJungle:
     def __init__(self, delai: float = 1.5, pages_max: int = 5):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update(HEADERS)
-        self.delai = delai
+        # Un 403 répété ici veut probablement dire que la clé Algolia publique
+        # a changé : insister ne la fera pas revenir, il faut relancer
+        # l'interception réseau. D'où le disjoncteur, comme sur Indeed.
+        self.client = ClientSource("wttj", delai, empreinte=EMPREINTE,
+                                   entetes=HEADERS, jitter=0.6, refus_max=3,
+                                   blocage=BlocageWTTJ)
         self.pages_max = pages_max
-        self._dernier = 0.0
-        self.requetes = 0
-        self._refus = 0
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier) + random.uniform(0, 0.6)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
     def _appel(self, methode: str, url: str, **kw) -> dict | None:
-        for essai in range(3):
-            self._patienter()
-            self.requetes += 1
-            try:
-                r = getattr(self.session, methode)(url, **kw)
-            except Exception as e:
-                log.warning("réseau : %s", e)
-                time.sleep(self.delai * (2**essai))
-                continue
-            if r.status_code == 200:
-                self._refus = 0
-                try:
-                    return r.json()
-                except ValueError:
-                    log.warning("réponse non-JSON sur %s", url)
-                    return None
-            if r.status_code == 404:
-                return None
-            if r.status_code in (403, 429):
-                self._refus += 1
-                if self._refus >= 3:
-                    raise BlocageWTTJ(
-                        "Welcome to the Jungle refuse les requêtes (3 refus "
-                        "consécutifs). La clé Algolia publique a peut-être été "
-                        "changée : relancer l'interception réseau."
-                    )
-                pause = self.delai * (2 ** (essai + 1)) + random.uniform(0, 4)
-                log.warning("HTTP %s — pause %.0f s (refus %d/3)",
-                            r.status_code, pause, self._refus)
-                time.sleep(pause)
-                continue
-            log.warning("HTTP %s sur %s", r.status_code, url)
-            return None
-        return None
+        """Aiguille vers le client partagé, en gardant la signature d'origine :
+        l'index Algolia se consulte en POST, les fiches en GET."""
+        if methode == "post":
+            return self.client.post_json(url, **kw)
+        return self.client.get_json(url, **kw)
 
     def rechercher(self, mots_cles: str) -> list[Job]:
         """Interroge l'index et déduplique la syndication.
@@ -316,8 +282,8 @@ class WelcomeToTheJungle:
         return job, json.dumps(donnees, ensure_ascii=False)
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()
 
 
-class BlocageWTTJ(RuntimeError):
+class BlocageWTTJ(Blocage):
     """WTTJ refuse durablement : s'arrêter plutôt qu'insister."""

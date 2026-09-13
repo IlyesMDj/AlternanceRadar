@@ -18,6 +18,22 @@ jeton à placer dans la variable d'environnement `LBA_API_KEY`.
 NOTE : écrit d'après la spec OpenAPI officielle (`/api/documentation/json`),
 mais jamais exécuté contre l'API réelle faute de jeton. Les formes exactes de
 `workplace.location` et `offer.publication` sont donc lues défensivement.
+
+**Seul collecteur à ne PAS utiliser `collectors/http.py`, et délibérément.**
+Sa politique de refus contredit celle du client partagé sur trois points, et
+les aligner rendrait l'un des deux faux :
+
+- un **403 signifie ici « clé refusée »**, pas « refus temporaire ». Le
+  réessayer est inutile : la clé ne deviendra pas valide à la troisième
+  tentative. Il lève donc tout de suite, avec le message qui dit quoi faire ;
+- le **rythme est dicté par l'API**, qui documente son quota dans ses en-têtes
+  `x-ratelimit-*` et son délai dans `retry-after`. Les suivre vaut mieux que
+  n'importe quel backoff deviné — et c'est la seule source qui les fournit ;
+- le **quota restant est une donnée métier** (`quota_restant`), affichée à
+  l'utilisateur, pas un détail de transport.
+
+C'est une API authentifiée qui coopère, là où les dix autres sources sont des
+sites qu'on interroge sans qu'ils nous doivent quoi que ce soit.
 """
 
 from __future__ import annotations

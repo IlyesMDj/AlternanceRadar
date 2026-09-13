@@ -23,17 +23,15 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-
-from curl_cffi import requests as cffi
 
 from core.models import Job, horodatage
+
+from .http import EMPREINTE, ClientSource
 
 log = logging.getLogger("welovedevs")
 
 RECHERCHE = "https://search.welovedevs.com/poc"
 INDEX = "public_jobs"
-EMPREINTE = "chrome124"
 PAR_PAGE = 100
 
 
@@ -63,25 +61,17 @@ def _description(hit: dict) -> str:
 
 class WeLoveDevs:
     def __init__(self, delai: float = 1.5):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update({
-            "Accept-Language": "fr-FR,fr;q=0.9",
-            "Content-Type": "text/plain;charset=UTF-8",
-            "Referer": "https://welovedevs.com/",
-        })
-        self.delai = delai
-        self._dernier = 0.0
-        self.requetes = 0
+        self.client = ClientSource(
+            "welovedevs", delai, empreinte=EMPREINTE, jitter=0.0,
+            tentatives=1,
+            entetes={"Content-Type": "text/plain;charset=UTF-8",
+                     "Referer": "https://welovedevs.com/"})
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
     def _page(self, contrat: str, page: int) -> dict | None:
-        self._patienter()
-        self.requetes += 1
         corps = [{"indexName": INDEX, "params": {
             "clickAnalytics": False,
             "facetFilters": [[f"contractTypes:{contrat}"]],
@@ -89,13 +79,10 @@ class WeLoveDevs:
             "page": page,
             "query": "",
         }}]
-        r = self.session.post(RECHERCHE, data=json.dumps(corps))
-        if r.status_code != 200:
-            log.warning("HTTP %s sur la page %d", r.status_code, page)
-            return None
+        donnees = self.client.post_json(RECHERCHE, data=json.dumps(corps))
         try:
-            return r.json()["results"][0]
-        except (ValueError, KeyError, IndexError):
+            return donnees["results"][0]
+        except (TypeError, KeyError, IndexError):
             log.warning("réponse inattendue sur la page %d", page)
             return None
 
@@ -146,4 +133,4 @@ class WeLoveDevs:
         return jobs
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()

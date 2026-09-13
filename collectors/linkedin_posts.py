@@ -35,6 +35,7 @@ from urllib.parse import quote
 import httpx
 from bs4 import BeautifulSoup
 
+from core.contacts import extraire_emails  # noqa: F401  (reexport)
 from core.models import Job
 
 log = logging.getLogger("li-posts")
@@ -44,12 +45,10 @@ RECHERCHE = (
     "?keywords={kw}&datePosted=%22{fenetre}%22&sortBy=%22date_posted%22"
 )
 
-# Une adresse e-mail dans un post de recrutement, éventuellement obfusquée
-# (« contact [at] boite [dot] fr ») pour échapper aux robots.
-_EMAIL = re.compile(
-    r"[a-zA-Z0-9._%+-]+\s*(?:@|\(at\)|\[at\]|\s+at\s+)\s*"
-    r"[a-zA-Z0-9.-]+\s*(?:\.|\(dot\)|\[dot\]|\s+dot\s+)\s*[a-zA-Z]{2,}"
-)
+# `extraire_emails` vit desormais dans `core/contacts.py` : les dix autres
+# sources livrent des descriptions entieres, dont 37 portaient une adresse
+# que personne ne lisait. Importee plus bas, et reexportee pour les deux
+# appelants historiques (`posts_web`, `main.py`).
 
 # Dates relatives affichées par LinkedIn, en français comme en anglais.
 _AGE = re.compile(r"(\d+)\s*(minutes?|min|heures?|h|jours?|j|semaines?|sem|mois|mo|ans?|yr|w|d|m)\b",
@@ -291,18 +290,6 @@ def _age_en_jours(texte: str) -> int | None:
     """
     m = _AGE_ANCRE.search(texte or "") or _AGE.search(texte or "")
     return _unite_en_jours(int(m.group(1)), m.group(2)) if m else None
-
-
-def extraire_emails(texte: str) -> list[str]:
-    """Extrait et désobfusque les adresses e-mail d'un post."""
-    trouves = []
-    for brut in _EMAIL.findall(texte or ""):
-        adresse = re.sub(r"\s*(?:\(at\)|\[at\]|\s+at\s+)\s*", "@", brut, flags=re.I)
-        adresse = re.sub(r"\s*(?:\(dot\)|\[dot\]|\s+dot\s+)\s*", ".", adresse, flags=re.I)
-        adresse = adresse.replace(" ", "").strip(".,;:")
-        if "@" in adresse and "." in adresse.split("@")[-1]:
-            trouves.append(adresse.lower())
-    return sorted(set(trouves))
 
 
 class LinkedInPosts:

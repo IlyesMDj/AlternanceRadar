@@ -28,21 +28,19 @@ from __future__ import annotations
 import html
 import json
 import logging
-import random
 import re
-import time
 from datetime import date, datetime
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests as cffi
 
 from core.models import Job, horodatage
+
+from .http import EMPREINTE, Blocage, ClientSource
 
 log = logging.getLogger("jobteaser")
 
 BASE = "https://www.jobteaser.com"
 RECHERCHE = f"{BASE}/fr/job-offers"
-EMPREINTE = "chrome124"
 
 HEADERS = {"Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8"}
 
@@ -95,51 +93,18 @@ def _json_ld_offre(soup) -> dict:
 
 class JobTeaser:
     def __init__(self, delai: float = 3.0, pages_max: int = 4):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update(HEADERS)
-        self.delai = delai
+        self.client = ClientSource("jobteaser", delai, empreinte=EMPREINTE,
+                                   entetes=HEADERS, jitter=1.2, refus_max=3,
+                                   blocage=BlocageJobTeaser)
         self.pages_max = pages_max
-        self._dernier = 0.0
-        self.requetes = 0
-        self._refus = 0
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier) + random.uniform(0, 1.2)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
-    def _get(self, url: str, params: dict | None = None, tentatives: int = 3) -> str | None:
-        for essai in range(tentatives):
-            self._patienter()
-            self.requetes += 1
-            try:
-                r = self.session.get(url, params=params)
-            except Exception as e:
-                log.warning("réseau : %s", e)
-                time.sleep(self.delai * (2**essai))
-                continue
-            if r.status_code == 200:
-                self._refus = 0
-                return r.text
-            if r.status_code == 404:
-                return None
-            if r.status_code in (403, 429):
-                # Même politique qu'Indeed : on s'arrête au lieu de marteler.
-                self._refus += 1
-                if self._refus >= 3:
-                    raise BlocageJobTeaser(
-                        "JobTeaser refuse les requêtes (3 refus consécutifs). "
-                        "Arrêt du collecteur."
-                    )
-                pause = self.delai * (2 ** (essai + 1)) + random.uniform(0, 5)
-                log.warning("HTTP %s — pause %.0f s (refus %d/3)",
-                            r.status_code, pause, self._refus)
-                time.sleep(pause)
-                continue
-            log.warning("HTTP %s sur %s", r.status_code, url)
-            return None
-        return None
+    def _get(self, url: str, params: dict | None = None,
+             tentatives: int = 3) -> str | None:
+        return self.client.get(url, params, tentatives)
 
     def rechercher(self, mots_cles: str) -> list[Job]:
         """Relève les identifiants d'offres, page par page.
@@ -211,8 +176,8 @@ class JobTeaser:
         return job, page
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()
 
 
-class BlocageJobTeaser(RuntimeError):
+class BlocageJobTeaser(Blocage):
     """JobTeaser refuse durablement : s'arrêter plutôt qu'insister."""

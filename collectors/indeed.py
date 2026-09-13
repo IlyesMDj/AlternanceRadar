@@ -18,23 +18,17 @@ from __future__ import annotations
 import html
 import json
 import logging
-import random
 import re
-import time
 from datetime import date, datetime
 
-from curl_cffi import requests as cffi
-
 from core.models import Job, horodatage
+
+from .http import EMPREINTE, Blocage, ClientSource
 
 log = logging.getLogger("indeed")
 
 BASE = "https://fr.indeed.com"
 RECHERCHE = f"{BASE}/jobs"
-
-# Empreinte navigateur rejouée. À faire évoluer si Indeed resserre : la
-# liste des profils disponibles est celle de curl_cffi.
-EMPREINTE = "chrome124"
 
 HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -50,8 +44,12 @@ _DESCRIPTION = re.compile(
 )
 
 
-class BlocageIndeed(RuntimeError):
-    """Indeed refuse durablement les requêtes : il faut s'arrêter, pas insister."""
+class BlocageIndeed(Blocage):
+    """Indeed refuse durablement les requêtes : il faut s'arrêter, pas insister.
+
+    Reste une classe propre à la source pour que `main.py` puisse la
+    rattraper seule et continuer avec les autres collecteurs.
+    """
 
 
 # Valeurs que le filtre d'ancienneté d'Indeed accepte réellement. Hors de ce
@@ -104,53 +102,20 @@ def _parse_resultats(page: str) -> list[dict]:
 
 class Indeed:
     def __init__(self, delai: float = 4.0, pages_max: int = 5):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update(HEADERS)
-        self.delai = delai
+        # `refus_max=3` : s'obstiner face à un refus l'aggrave. C'est en
+        # enchaînant onze tentatives qu'on s'est fait couper le 15/08/2026.
+        self.client = ClientSource("indeed", delai, empreinte=EMPREINTE,
+                                   entetes=HEADERS, jitter=1.5,
+                                   refus_max=3, blocage=BlocageIndeed)
         self.pages_max = pages_max
-        self._dernier = 0.0
-        self.requetes = 0
-        self._refus = 0  # 403 consécutifs
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier) + random.uniform(0, 1.5)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
-    def _get(self, url: str, params: dict | None = None, tentatives: int = 3) -> str | None:
-        for essai in range(tentatives):
-            self._patienter()
-            self.requetes += 1
-            try:
-                r = self.session.get(url, params=params)
-            except Exception as e:
-                log.warning("réseau : %s", e)
-                time.sleep(self.delai * (2**essai))
-                continue
-            if r.status_code == 200:
-                self._refus = 0
-                return r.text
-            if r.status_code == 404:
-                return None
-            if r.status_code in (403, 429):
-                # Un 403 ne signale pas une requête malformée mais un refus
-                # de la source. S'obstiner l'aggrave : c'est en enchaînant
-                # onze tentatives qu'on s'est fait couper le 15/08/2026.
-                self._refus += 1
-                if self._refus >= 3:
-                    raise BlocageIndeed(
-                        "Indeed refuse les requêtes (3 refus consécutifs). "
-                        "Arrêt du collecteur — réessaie dans quelques heures."
-                    )
-                pause = self.delai * (2 ** (essai + 1)) + random.uniform(0, 5)
-                log.warning("HTTP %s — pause de %.0f s (refus %d/3)",
-                            r.status_code, pause, self._refus)
-                time.sleep(pause)
-                continue
-            log.warning("HTTP %s sur %s", r.status_code, url)
-            return None
-        return None
+    def _get(self, url: str, params: dict | None = None,
+             tentatives: int = 3) -> str | None:
+        return self.client.get(url, params, tentatives)
 
     def rechercher(self, mots_cles: str, age_max_jours: int = 14,
                    lieu: str = "France") -> list[Job]:
@@ -253,4 +218,4 @@ class Indeed:
         self._get(RECHERCHE, {"q": "alternance", "l": "France"})
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()

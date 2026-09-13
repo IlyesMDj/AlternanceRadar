@@ -32,19 +32,18 @@ from __future__ import annotations
 import html
 import logging
 import re
-import time
 from datetime import date, datetime
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests as cffi
 
 from core.models import Job, horodatage
+
+from .http import EMPREINTE, ClientSource
 
 log = logging.getLogger("adopte1dev")
 
 BASE = "https://adopte1dev.com"
 API = f"{BASE}/wp-json/wp/v2"
-EMPREINTE = "chrome124"
 
 # Frontière entre le gabarit du site et l'annonce elle-même.
 _DEBUT_ANNONCE = re.compile(r"\bLe Job\b")
@@ -77,35 +76,19 @@ def _date(valeur) -> date | None:
 
 class Adopte1Dev:
     def __init__(self, delai: float = 1.5):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update({"Accept-Language": "fr-FR,fr;q=0.9"})
-        self.delai = delai
-        self._dernier = 0.0
-        self.requetes = 0
+        # `tentatives=1` : une API WordPress ouverte qui refuse n'a aucune
+        # raison d'accepter à la deuxième demande — c'est le comportement
+        # d'origine de ce collecteur, conservé tel quel.
+        self.client = ClientSource("adopte1dev", delai, empreinte=EMPREINTE,
+                                   jitter=0.0, tentatives=1)
         self._termes: dict[str, dict[int, str]] = {}
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
     def _get(self, chemin: str, params: dict | None = None):
-        self._patienter()
-        self.requetes += 1
-        try:
-            r = self.session.get(API + chemin, params=params)
-        except Exception as e:
-            log.warning("réseau sur %s : %s", chemin, e)
-            return None
-        if r.status_code != 200:
-            log.warning("HTTP %s sur %s", r.status_code, chemin)
-            return None
-        try:
-            return r.json()
-        except ValueError:
-            log.warning("réponse non-JSON sur %s", chemin)
-            return None
+        return self.client.get_json(API + chemin, params=params)
 
     def termes(self, taxonomie: str) -> dict[int, str]:
         """Table identifiant → libellé, chargée une seule fois par run."""
@@ -201,4 +184,4 @@ class Adopte1Dev:
         return jobs
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()

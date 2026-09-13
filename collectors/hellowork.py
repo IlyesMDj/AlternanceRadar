@@ -13,15 +13,14 @@ from __future__ import annotations
 import html
 import json
 import logging
-import random
 import re
-import time
 from datetime import date, timedelta
 
-import httpx
 from bs4 import BeautifulSoup
 
 from core.models import Job
+
+from .http import ClientSource
 
 log = logging.getLogger("hellowork")
 
@@ -156,40 +155,20 @@ def _parse_cartes(html: str, age_max_jours: int) -> list[Job]:
 
 class HelloWork:
     def __init__(self, delai: float = 2.5, pages_max: int = 5):
-        self.client = httpx.Client(headers=HEADERS, timeout=25.0, follow_redirects=True)
-        self.delai = delai
+        # `refus_max=4` : HelloWork n'avait aucun disjoncteur avant la mise en
+        # commun du client. Il en hérite, un cran plus tolérant qu'Indeed —
+        # la source n'a jamais coupé, mais s'obstiner reste inutile.
+        self.client = ClientSource("hellowork", delai, entetes=HEADERS,
+                                   jitter=0.8, timeout=25.0, refus_max=4)
         self.pages_max = pages_max
-        self._dernier = 0.0
-        self.requetes = 0
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier) + random.uniform(0, 0.8)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
-    def _get(self, url: str, params: dict | None = None, tentatives: int = 3) -> str | None:
-        for essai in range(tentatives):
-            self._patienter()
-            self.requetes += 1
-            try:
-                r = self.client.get(url, params=params)
-            except httpx.HTTPError as e:
-                log.warning("réseau : %s", e)
-                time.sleep(self.delai * (2**essai))
-                continue
-            if r.status_code == 200:
-                return r.text
-            if r.status_code == 404:
-                return None
-            if r.status_code in (429, 403):
-                pause = self.delai * (2 ** (essai + 1)) + random.uniform(0, 4)
-                log.warning("HTTP %s — pause %.0fs", r.status_code, pause)
-                time.sleep(pause)
-                continue
-            log.warning("HTTP %s sur %s", r.status_code, url)
-            return None
-        return None
+    def _get(self, url: str, params: dict | None = None,
+             tentatives: int = 3) -> str | None:
+        return self.client.get(url, params, tentatives)
 
     def rechercher(self, mots_cles: str, age_max_jours: int = 14) -> list[Job]:
         trouves: dict[str, Job] = {}

@@ -51,22 +51,20 @@ from __future__ import annotations
 
 import json
 import logging
-import random
 import re
-import time
 import unicodedata
 import urllib.parse
 from datetime import date, timedelta
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests as cffi
 
 from core.models import Job
+
+from .http import EMPREINTE, Blocage, ClientSource
 
 log = logging.getLogger("glassdoor")
 
 BASE = "https://www.glassdoor.fr"
-EMPREINTE = "chrome124"
 PAYS_FRANCE = 86          # `IN86` dans le slug
 
 # « 26j », « 3j », « 30j+ » sur la carte ; parfois « 24 h » pour le jour même.
@@ -126,50 +124,19 @@ def _canoniques(soup) -> dict[str, str]:
 
 class Glassdoor:
     def __init__(self, delai: float = 5.0):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update({"Accept-Language": "fr-FR,fr;q=0.9"})
-        self.delai = delai
-        self._dernier = 0.0
-        self.requetes = 0
-        self._refus = 0
+        # `refus_max=3` : les fiches /job-listing/ répondent 403 quoi qu'on
+        # fasse (le blocage vise le chemin, pas nous). Sans disjoncteur, une
+        # série de fiches ferait boucler le collecteur sur du refus certain.
+        self.client = ClientSource("glassdoor", delai, empreinte=EMPREINTE,
+                                   jitter=2.0, refus_max=3,
+                                   blocage=BlocageGlassdoor)
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier) + random.uniform(0, 2)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
     def _get(self, url: str, tentatives: int = 3) -> str | None:
-        for essai in range(tentatives):
-            self._patienter()
-            self.requetes += 1
-            try:
-                r = self.session.get(url)
-            except Exception as e:
-                # Glassdoor répond parfois par un silence complet plutôt
-                # qu'un code d'erreur : le délai d'attente EST la réponse.
-                log.warning("réseau (%s) : %s", type(e).__name__, e)
-                time.sleep(self.delai * (2**essai))
-                continue
-            if r.status_code == 200:
-                self._refus = 0
-                return r.text
-            if r.status_code == 404:
-                return None
-            if r.status_code in (403, 429):
-                self._refus += 1
-                if self._refus >= 3:
-                    raise BlocageGlassdoor(
-                        "Glassdoor refuse les requêtes (3 refus consécutifs). "
-                        "Arrêt du collecteur.")
-                pause = self.delai * (2 ** (essai + 1)) + random.uniform(0, 6)
-                log.warning("HTTP %s — pause %.0f s (refus %d/3)",
-                            r.status_code, pause, self._refus)
-                time.sleep(pause)
-                continue
-            log.warning("HTTP %s sur %s", r.status_code, url)
-            return None
-        return None
+        return self.client.get(url, tentatives=tentatives)
 
     def rechercher(self, mots_cles: str, lieu: str = "france") -> list[Job]:
         """Première page de résultats — la seule que robots.txt autorise."""
@@ -255,8 +222,8 @@ class Glassdoor:
         return job, page
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()
 
 
-class BlocageGlassdoor(RuntimeError):
+class BlocageGlassdoor(Blocage):
     """Glassdoor refuse durablement : s'arrêter plutôt qu'insister."""

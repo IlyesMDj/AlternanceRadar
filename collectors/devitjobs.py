@@ -26,20 +26,19 @@ from __future__ import annotations
 import html
 import logging
 import re
-import time
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests as cffi
 
 from core.models import Job
+
+from .http import EMPREINTE, ClientSource
 
 log = logging.getLogger("devitjobs")
 
 BASE = "https://devitjobs.fr"
 FLUX = f"{BASE}/rss"
-EMPREINTE = "chrome124"
 
 _TITRE = re.compile(r"^(?P<poste>.+?)\s*@\s*(?P<entreprise>.+?)\s*\[(?P<salaire>[^\]]*)\]\s*$")
 _GENRE = re.compile(r"\(?\s*[hHfF]\s*/\s*[hHfF]\s*\)?")
@@ -85,28 +84,20 @@ def _ville(poste: str) -> str:
 
 class DevITJobs:
     def __init__(self, delai: float = 1.5):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=45)
-        self.session.headers.update({"Accept-Language": "fr-FR,fr;q=0.9"})
-        self.delai = delai
-        self._dernier = 0.0
-        self.requetes = 0
+        self.client = ClientSource("devitjobs", delai, empreinte=EMPREINTE,
+                                   jitter=0.0, tentatives=1)
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
     def rechercher(self) -> list[Job]:
         """Lit le flux entier. Aucune fiche à compléter ensuite."""
-        self._patienter()
-        self.requetes += 1
-        r = self.session.get(FLUX)
-        if r.status_code != 200:
-            log.warning("HTTP %s sur %s", r.status_code, FLUX)
+        page = self.client.get(FLUX)
+        if page is None:
             return []
 
-        soup = BeautifulSoup(r.text, "xml")
+        soup = BeautifulSoup(page, "xml")
         jobs: list[Job] = []
 
         for item in soup.find_all("item"):
@@ -135,4 +126,4 @@ class DevITJobs:
         return jobs
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()

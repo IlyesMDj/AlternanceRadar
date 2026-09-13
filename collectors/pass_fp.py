@@ -37,13 +37,13 @@ from __future__ import annotations
 import html
 import logging
 import re
-import time
 from datetime import date, datetime
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests as cffi
 
 from core.models import Job, horodatage
+
+from .http import EMPREINTE, ClientSource
 
 log = logging.getLogger("pass")
 
@@ -51,7 +51,6 @@ BASE = "https://www.pass.fonction-publique.gouv.fr"
 # `offres` = apprentissage ; `offres_stages` = stages, hors sujet ici mais
 # laissé configurable : `classify.py` tranchera si on l'active un jour.
 FLUX = {"apprentissage": "/flux/offres", "stages": "/flux/offres_stages"}
-EMPREINTE = "chrome124"
 
 _MAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 # « ven 14/08/2026 - 16:29 » — format du flux stages, différent de l'ISO
@@ -96,17 +95,12 @@ def _date(valeur: str) -> date | None:
 
 class PassFonctionPublique:
     def __init__(self, delai: float = 2.0):
-        self.session = cffi.Session(impersonate=EMPREINTE, timeout=60)
-        self.session.headers.update({"Accept-Language": "fr-FR,fr;q=0.9"})
-        self.delai = delai
-        self._dernier = 0.0
-        self.requetes = 0
+        self.client = ClientSource("pass", delai, empreinte=EMPREINTE,
+                                   jitter=0.0, tentatives=1, timeout=60.0)
 
-    def _patienter(self) -> None:
-        attente = self.delai - (time.monotonic() - self._dernier)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
     def rechercher(self, flux: str = "apprentissage") -> list[Job]:
         """Lit un flux entier. Aucune fiche à compléter ensuite."""
@@ -114,16 +108,13 @@ class PassFonctionPublique:
         if not chemin:
             raise ValueError(f"flux inconnu : {flux} (attendu : {sorted(FLUX)})")
 
-        self._patienter()
-        self.requetes += 1
-        r = self.session.get(BASE + chemin)
-        if r.status_code != 200:
-            log.warning("HTTP %s sur %s", r.status_code, chemin)
+        page = self.client.get(BASE + chemin)
+        if page is None:
             return []
 
         # Analyseur XML : en mode HTML, lxml renomme les balises Dublin Core
         # et `creator`, `coverage` ou `format` deviennent introuvables.
-        soup = BeautifulSoup(r.text, "xml")
+        soup = BeautifulSoup(page, "xml")
         jobs: list[Job] = []
 
         for item in soup.find_all("item"):
@@ -172,4 +163,4 @@ class PassFonctionPublique:
         return jobs
 
     def close(self) -> None:
-        self.session.close()
+        self.client.close()

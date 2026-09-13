@@ -13,15 +13,14 @@ Le plafond des 1000 est contourné en découpant les requêtes
 from __future__ import annotations
 
 import logging
-import random
 import re
-import time
 from datetime import date, datetime
 
-import httpx
 from bs4 import BeautifulSoup
 
 from core.models import Job
+
+from .http import ClientSource
 
 log = logging.getLogger("linkedin")
 
@@ -142,49 +141,29 @@ def _parse_detail(html: str) -> dict:
 
 class LinkedInGuest:
     def __init__(self, delai: float = 3.0, max_pages: int = 8):
-        self.client = httpx.Client(headers=HEADERS, timeout=25.0, follow_redirects=True)
-        self.delai = delai
+        # 999 est le code maison de LinkedIn pour « requête bloquée » : il se
+        # traite comme un 429, pas comme un code inattendu. 400 rejoint 404 —
+        # requête invalide ou offre expirée, insister ne changera rien.
+        #
+        # `refus_max=4` : ce collecteur n'avait pas de disjoncteur. C'est
+        # pourtant la source la plus exposée du projet, et celle qu'on a le
+        # moins envie de voir s'obstiner sous un 999.
+        self.client = ClientSource("linkedin", delai, entetes=HEADERS,
+                                   jitter=1.0, timeout=25.0, tentatives=4,
+                                   codes_refus=(403, 429, 999),
+                                   codes_abandon=(400, 404), refus_max=4)
         self.max_pages = max_pages
-        self._dernier_appel = 0.0
-        self.requetes = 0
 
     # -- transport --------------------------------------------------------
 
-    def _patienter(self) -> None:
-        """Throttle avec jitter — un rythme parfaitement régulier se repère."""
-        ecoule = time.monotonic() - self._dernier_appel
-        attente = self.delai - ecoule + random.uniform(0, 1.0)
-        if attente > 0:
-            time.sleep(attente)
-        self._dernier_appel = time.monotonic()
+    @property
+    def requetes(self) -> int:
+        return self.client.requetes
 
-    def _get(self, url: str, params: dict | None = None, tentatives: int = 4) -> str | None:
-        for essai in range(tentatives):
-            self._patienter()
-            self.requetes += 1
-            try:
-                r = self.client.get(url, params=params)
-            except httpx.HTTPError as e:
-                log.warning("erreur réseau (%s) — nouvelle tentative", e)
-                time.sleep(self.delai * (2**essai))
-                continue
+    def _get(self, url: str, params: dict | None = None,
+             tentatives: int = 4) -> str | None:
+        return self.client.get(url, params, tentatives)
 
-            if r.status_code == 200:
-                return r.text
-            if r.status_code in (400, 404):
-                return None  # offre expirée ou requête invalide : inutile d'insister
-            if r.status_code in (429, 999, 403):
-                # 999 = code maison LinkedIn pour « requête bloquée »
-                pause = self.delai * (2 ** (essai + 1)) + random.uniform(0, 5)
-                log.warning("HTTP %s — pause de %.0fs", r.status_code, pause)
-                time.sleep(pause)
-                continue
-
-            log.warning("HTTP %s inattendu sur %s", r.status_code, url)
-            return None
-
-        log.error("abandon après %d tentatives : %s", tentatives, url)
-        return None
 
     # -- collecte ---------------------------------------------------------
 
