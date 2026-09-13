@@ -32,6 +32,7 @@ sys.path.insert(0, str(RACINE))
 
 from collectors.linkedin_guest import LinkedInGuest  # noqa: E402
 from core.classify import annotate  # noqa: E402
+from core.contacts import extraire_emails  # noqa: E402
 from core.exclusions import Exclusions  # noqa: E402
 from core.models import Job  # noqa: E402
 from core.score import Scorer  # noqa: E402
@@ -77,14 +78,22 @@ def surveiller(store: Store, source: str, jobs: list,
 
 
 def pipeline(cfg: dict):
-    """Retourne la fonction qui prépare un job : classification, score, exclusion.
+    """Retourne la fonction qui prépare un job : contacts, classification,
+    score, exclusion.
 
-    Les trois étapes vont toujours ensemble et dans cet ordre — les regrouper
-    évite qu'un collecteur en oublie une et laisse passer un secteur exclu.
+    Les étapes vont toujours ensemble et dans cet ordre — les regrouper évite
+    qu'un collecteur en oublie une et laisse passer un secteur exclu.
     """
     scorer, exclusions = Scorer(cfg), Exclusions(cfg)
 
     def preparer(job: Job) -> Job:
+        # Les adresses trouvées dans la description viennent COMPLÉTER celles
+        # que le collecteur a pu poser lui-même (les posts de fil en mettent),
+        # jamais les remplacer. L'extraction ne coûte aucune requête et vaut
+        # cher : 37 offres retenues portaient un e-mail que personne ne lisait,
+        # contre 23 qui en avaient un enregistré. Le canal double.
+        job.contacts = sorted(set(job.contacts)
+                              | set(extraire_emails(job.description)))
         return exclusions.appliquer(scorer.score(annotate(job)))
 
     return preparer
@@ -110,6 +119,29 @@ def fenetre_de(args, defaut_heures: int) -> tuple[int, int]:
     """
     heures = FENETRES[args.depuis] if getattr(args, "depuis", None) else defaut_heures
     return heures, max(1, round(heures / 24))
+
+
+def budgets(plafond: int, nouveaux: int, part_backlog: float = 0.25
+            ) -> tuple[int, int]:
+    """Répartit le budget de fiches détaillées entre nouveautés et backlog.
+
+    Le rattrapage se contentait du RESTE : `plafond - len(nouveaux)`. Les
+    jours chargés, il ne restait rien, et les offres stockées sans description
+    n'étaient jamais reprises. Constaté en base : 178 offres LinkedIn retenues
+    à `detail_essais = 0` — pas trois échecs, zéro tentative.
+
+    Ce n'est pas une perte cosmétique. Une offre sans description n'est scorée
+    que sur son titre, et le manque se voit : **-32 de score moyen contre +8**
+    pour celles qui en ont une. Elles ne sont pas mauvaises, elles sont muettes
+    — et le digest les enterre comme si elles étaient mauvaises.
+
+    D'où une part RÉSERVÉE, que les nouveautés ne peuvent pas manger. Le
+    budget non consommé par les nouveautés revient au backlog, comme avant :
+    la réserve est un plancher, pas un plafond.
+    """
+    reserve = int(plafond * part_backlog)
+    pour_neuf = plafond - reserve
+    return pour_neuf, plafond - min(nouveaux, pour_neuf)
 
 
 def fenetre_affichage(args) -> int | None:
@@ -234,7 +266,9 @@ def cmd_collect(args, cfg: dict, store: Store) -> None:
         preparer(job)
     nouveaux.sort(key=lambda j: j.score, reverse=True)
 
-    plafond = args.max_details or r.get("max_details_par_run", 250)
+    plafond_total = args.max_details or r.get("max_details_par_run", 250)
+    plafond, budget_backlog = budgets(
+        plafond_total, len(nouveaux), r.get("part_backlog", 0.25))
     if len(nouveaux) > plafond:
         log.warning("plafond atteint : %d fiches détaillées sur %d nouvelles offres "
                     "(les %d moins pertinentes sont enregistrées sans description)",
@@ -242,18 +276,12 @@ def cmd_collect(args, cfg: dict, store: Store) -> None:
 
     # 3. Fiches détaillées, classification, scoring, stockage
     #
-    # LinkedIn n'a aucun filtre « alternance » : on requête large et 80 % de
-    # ce qui revient n'en est pas. Tout stocker a produit 24 763 lignes pour
-    # 71 offres réellement exploitables — 0,3 % — qui diluent le digest et
-    # pèsent sur chaque commande.
-    #
-    # Le tri se fait donc à l'ENTRÉE. Mesuré avant de trancher : sur les
-    # 4 389 offres LinkedIn ayant une description, 8 seulement (0,2 %)
-    # devaient leur détection à cette description plutôt qu'à leur intitulé,
-    # toutes à score faible. Écarter sur le seul intitulé ne perd donc
-    # presque rien, et `est_alternance` ne dépend pas de config.yaml — un
-    # réglage de poids ne peut pas rendre exploitable ce qu'on a écarté ici.
-    garder_tout = not cfg.get("recherche", {}).get("stocker_alternance_seulement", True)
+    # Le tri se fait à l'ENTRÉE, via `garder()` — la même règle que pour
+    # toutes les autres sources depuis qu'elle a été sortie d'ici. Mesuré
+    # avant de trancher, sur LinkedIn : des 4 389 offres ayant une
+    # description, 8 seulement (0,2 %) devaient leur détection à cette
+    # description plutôt qu'à leur intitulé, toutes à score faible. Écarter
+    # sur le seul intitulé ne perd donc presque rien.
     retenues = ecartees = 0
     for i, job in enumerate(nouveaux, 1):
         if i <= plafond:
@@ -261,7 +289,7 @@ def cmd_collect(args, cfg: dict, store: Store) -> None:
             if html:
                 sauver_brut(RACINE / "store" / "raw", "linkedin", job.external_id, html)
         preparer(job)
-        if not (job.is_alternance or garder_tout):
+        if not garder(job, "linkedin", cfg):
             ecartees += 1
             continue
         if store.upsert(job) and job.is_alternance:
@@ -269,12 +297,11 @@ def cmd_collect(args, cfg: dict, store: Store) -> None:
         if i % 25 == 0:
             log.info("  ... %d/%d fiches traitées", i, len(nouveaux))
 
-    # 4. Rattrapage : si le plafond n'a pas été consommé, on complète les
-    #    offres des runs précédents restées sans description. Sur plusieurs
-    #    jours, le backlog se résorbe tout seul.
-    budget_restant = plafond - min(len(nouveaux), plafond)
-    if budget_restant > 0:
-        backlog = store.sans_description("linkedin", budget_restant)
+    # 4. Rattrapage des offres restées sans description. Le budget est
+    #    RÉSERVÉ (voir `budgets`) : sans réserve, un run chargé le mangeait
+    #    entièrement et le backlog ne se résorbait jamais.
+    if budget_backlog > 0:
+        backlog = store.sans_description("linkedin", budget_backlog)
         if backlog:
             log.info("rattrapage : %d fiches en attente de description", len(backlog))
             for job in backlog:
@@ -302,7 +329,9 @@ def cmd_hellowork(args, cfg: dict, store: Store) -> None:
     h = cfg.get("hellowork", {})
     preparer = pipeline(cfg)
     heures, age_max = fenetre_de(args, h.get("age_max_jours", 14) * 24)
-    plafond = args.max_details or h.get("max_details_par_run", 150)
+    plafond_total = args.max_details or h.get("max_details_par_run", 150)
+    plafond, budget_backlog = budgets(
+        plafond_total, 0, h.get("part_backlog", 0.25))
 
     client = HelloWork(delai=h.get("delai", 2.5), pages_max=h.get("pages_max", 6))
     cartes: dict[str, Job] = {}
@@ -334,13 +363,14 @@ def cmd_hellowork(args, cfg: dict, store: Store) -> None:
             if html:
                 sauver_brut(RACINE / "store" / "raw", "hellowork", job.external_id, html)
         preparer(job)
-        if store.upsert(job):
+        if garder(job, "hellowork", cfg) and store.upsert(job):
             retenues += 1
 
-    # Rattrapage identique à LinkedIn : le backlog se résorbe sur plusieurs runs.
-    reste = plafond - min(len(nouveaux), plafond)
-    if reste > 0:
-        for job in store.sans_description("hellowork", reste):
+    # Rattrapage identique à LinkedIn, réserve comprise.
+    _, budget_backlog = budgets(plafond_total, len(nouveaux),
+                                h.get("part_backlog", 0.25))
+    if budget_backlog > 0:
+        for job in store.sans_description("hellowork", budget_backlog):
             job, html = client.detail(job)
             if html:
                 sauver_brut(RACINE / "store" / "raw", "hellowork", job.external_id, html)
@@ -398,7 +428,7 @@ def cmd_indeed(args, cfg: dict, store: Store) -> None:
     retenues = 0
     for job in nouveaux:
         preparer(job)
-        if store.upsert(job):
+        if garder(job, "indeed", cfg) and store.upsert(job):
             retenues += 1
 
     # Rattrapage du backlog des runs précédents, par lots également.
@@ -452,7 +482,7 @@ def cmd_jobteaser(args, cfg: dict, store: Store) -> None:
         if page:
             sauver_brut(RACINE / "store" / "raw", "jobteaser", job.external_id, page)
         preparer(job)
-        if store.upsert(job):
+        if garder(job, "jobteaser", cfg) and store.upsert(job):
             retenues += 1
         if n % 20 == 0:
             log.info("  ... %d/%d fiches", n, min(len(nouveaux), plafond))
@@ -515,20 +545,8 @@ def cmd_wttj(args, cfg: dict, store: Store) -> None:
         log.error("aucune offre — index Algolia inaccessible ?")
         return
 
-    surveiller(store, "wttj", list(cartes.values()))
-    frais = filtrer_par_age(cartes, age_max, heures=heures)
-    store.maj_horodatages(frais.values())
-
-    connus = store.ids_connus("wttj")
-    nouveaux = [c for c in frais.values() if c.external_id not in connus]
-    log.info("%d offres distinctes, %d dans la fenêtre, %d nouvelles (%d requêtes)",
-             len(cartes), len(frais), len(nouveaux), client.requetes)
-
-    retenues = 0
-    for job in nouveaux:
-        preparer(job)
-        if store.upsert(job):
-            retenues += 1
+    enregistrer_lot(args, cfg, store, "wttj", cartes, client.requetes,
+                    heures=heures, age_max=age_max)
 
     # La description arrive après coup : une offre sans elle reste utilisable
     # (le contrat vient de la facette serveur, pas du texte). Le plafond ne
@@ -543,50 +561,7 @@ def cmd_wttj(args, cfg: dict, store: Store) -> None:
             log.info("  ... %d/%d descriptions", n, len(manquantes))
 
     client.close()
-    log.info("terminé — %d nouvelles offres Welcome to the Jungle "
-             "(%d descriptions récupérées)", retenues, len(manquantes))
-    cmd_stats(args, cfg, store)
-
-
-def cmd_pass(args, cfg: dict, store: Store) -> None:
-    """PASS — flux RSS officiel de l'apprentissage dans la fonction publique.
-
-    Le collecteur le plus simple du projet : une requête, aucune fiche à
-    compléter. Le flux porte déjà les descriptions complètes, et jusqu'à
-    l'adresse de candidature.
-    """
-    from collectors.pass_fp import PassFonctionPublique
-
-    p = cfg.get("pass", {})
-    preparer = pipeline(cfg)
-    heures, age_max = fenetre_de(args, p.get("age_max_jours", 14) * 24)
-
-    client = PassFonctionPublique(delai=p.get("delai", 2.0))
-    cartes: dict[str, Job] = {}
-    for flux in p.get("flux", ["apprentissage"]):
-        try:
-            for job in client.rechercher(flux):
-                cartes.setdefault(job.external_id, job)
-        except Exception as e:
-            log.error("flux « %s » — échec : %s", flux, e)
-    client.close()
-
-    if not cartes:
-        log.error("aucune offre — le flux RSS a-t-il changé de forme ?")
-        return
-
-    surveiller(store, "pass", list(cartes.values()))
-    frais = filtrer_par_age(cartes, age_max, heures=heures)
-    store.maj_horodatages(frais.values())
-
-    connus = store.ids_connus("pass")
-    nouveaux = [c for c in frais.values() if c.external_id not in connus]
-    log.info("%d offres au flux, %d dans la fenêtre, %d nouvelles (%d requêtes)",
-             len(cartes), len(frais), len(nouveaux), client.requetes)
-
-    retenues = sum(bool(store.upsert(preparer(job))) for job in nouveaux)
-    log.info("terminé — %d nouvelles offres PASS", retenues)
-    cmd_stats(args, cfg, store)
+    log.info("%d descriptions Welcome to the Jungle récupérées", len(manquantes))
 
 
 def cmd_glassdoor(args, cfg: dict, store: Store) -> None:
@@ -624,15 +599,8 @@ def cmd_glassdoor(args, cfg: dict, store: Store) -> None:
         log.error("aucune offre — le slug de recherche a-t-il changé ?")
         return
 
-    surveiller(store, "glassdoor", list(cartes.values()), age_max)
-    frais = filtrer_par_age(cartes, age_max, heures=heures)
-
-    connus = store.ids_connus("glassdoor")
-    nouveaux = [c for c in frais.values() if c.external_id not in connus]
-    log.info("%d offres distinctes, %d dans la fenêtre, %d nouvelles (%d requêtes)",
-             len(cartes), len(frais), len(nouveaux), client.requetes)
-
-    retenues = sum(bool(store.upsert(preparer(job))) for job in nouveaux)
+    enregistrer_lot(args, cfg, store, "glassdoor", cartes, client.requetes,
+                    heures=heures, age_max=age_max, fenetre_canari=age_max)
 
     # Les fiches répondent 403 : le plafond est à 0 dans la configuration, et
     # cette garde évite d'entrer dans la boucle pour rien. Le code reste prêt
@@ -652,130 +620,197 @@ def cmd_glassdoor(args, cfg: dict, store: Store) -> None:
             log.info("  ... %d/%d fiches", n, len(manquantes))
 
     client.close()
-    log.info("terminé — %d nouvelles offres Glassdoor (%d fiches complétées)",
-             retenues, len(manquantes))
-    cmd_stats(args, cfg, store)
+    if manquantes:
+        log.info("%d fiches Glassdoor complétées", len(manquantes))
 
 
-def cmd_adopte1dev(args, cfg: dict, store: Store) -> None:
-    """adopte1dev — job board 100 % développement, API WordPress ouverte.
+def alternance_seulement(cfg: dict, source: str) -> bool:
+    """Faut-il n'enregistrer que les alternances, pour cette source ?
 
-    Une passe suffit : le filtre de contrat est côté serveur et la réponse
-    porte déjà description, entreprise, ville et technologies.
+    Réglage global dans `recherche.stocker_alternance_seulement`, qu'une
+    source peut désactiver dans son propre bloc de config.
+
+    Le tri à l'ENTRÉE a été introduit pour LinkedIn, qui n'a aucun filtre
+    « alternance » : on requête large et 80 % de ce qui revient n'en est pas.
+    Il n'avait jamais été étendu aux autres sources dans le même cas, et ça se
+    voyait en base — DevITjobs y tenait 1 802 lignes pour 109 alternances,
+    soit 41 % de la base entière et 4,2 Mo de descriptions pour zéro offre
+    exploitable. Le digest n'en montrait rien (il filtre sur `is_alternance`),
+    mais chaque `rescore` et chaque `recalculer_doublons` les traitait.
+
+    Sans effet sur les sources dont le filtre de contrat est natif — HelloWork,
+    Welcome to the Jungle, WeLoveDevs, adopte1dev, PASS : chez elles tout ce
+    qui rentre est déjà une alternance.
+
+    Réversible : passer le réglage à `false` et relancer `collect` fait
+    revenir ce qui avait été écarté. Contrairement à un seuil de SCORE, qui
+    aurait rendu `rescore` menteur, `est_alternance` ne dépend pas de
+    `config.yaml` : aucun réglage de poids ne peut rendre exploitable ce qui
+    est écarté ici.
     """
-    from collectors.adopte1dev import Adopte1Dev
+    global_ = cfg.get("recherche", {}).get("stocker_alternance_seulement", True)
+    return bool(cfg.get(source, {}).get("stocker_alternance_seulement", global_))
 
-    a = cfg.get("adopte1dev", {})
+
+def garder(job: Job, source: str, cfg: dict) -> bool:
+    """Cette offre mérite-t-elle une ligne en base ?
+
+    Le point de décision unique pour les collectes en DEUX temps, qui ne
+    passent pas par `enregistrer_lot` et appellent `upsert` elles-mêmes.
+    """
+    return job.is_alternance or not alternance_seulement(cfg, source)
+
+
+def enregistrer_lot(args, cfg: dict, store: Store, source: str,
+                    cartes: dict, requetes: int, *,
+                    heures: int | None = None, age_max: int | None = None,
+                    fenetre_canari: int | None = None,
+                    quoi: str = "offres") -> tuple[int, list]:
+    """Canari, fenêtre de fraîcheur, tri des nouveautés, stockage.
+
+    La moitié aval de toute collecte, identique d'une source à l'autre. Rend
+    (nombre de nouveautés retenues, liste des nouveautés) pour que l'appelant
+    puisse enchaîner sur une phase de fiches détaillées s'il en a une.
+
+    Le canari tourne TOUJOURS sur le lot brut, avant tout filtre d'âge : il
+    mesure l'extraction, pas la fraîcheur.
+    """
     preparer = pipeline(cfg)
-    heures, age_max = fenetre_de(args, a.get("age_max_jours", 14) * 24)
 
-    client = Adopte1Dev(delai=a.get("delai", 1.5))
+    surveiller(store, source, list(cartes.values()), fenetre_canari)
+
+    frais = cartes
+    if age_max is not None:
+        frais = filtrer_par_age(cartes, age_max, quoi=quoi, heures=heures)
+        store.maj_horodatages(frais.values())
+
+    connus = store.ids_connus(source)
+    nouveaux = [c for c in frais.values() if c.external_id not in connus]
+    log.info("%d %s, %d dans la fenêtre, %d nouvelles (%d requêtes)",
+             len(cartes), quoi, len(frais), len(nouveaux), requetes)
+
+    filtrer = alternance_seulement(cfg, source)
+    retenues = ecartees = 0
+    for job in nouveaux:
+        preparer(job)
+        if filtrer and not job.is_alternance:
+            ecartees += 1
+            continue
+        if store.upsert(job):
+            retenues += 1
+
+    if ecartees:
+        log.info("%d offres écartées à l'entrée (pas de marqueur d'alternance)",
+                 ecartees)
+    log.info("terminé — %d nouvelles offres %s", retenues, source)
+    cmd_stats(args, cfg, store)
+    return retenues, nouveaux
+
+
+# ------------------------------------------------------------------------
+#  Collectes en une passe
+#
+#  Quatre sources livrent tout d'un coup : description comprise, aucune fiche
+#  à aller chercher ensuite. Leurs commandes étaient rigoureusement
+#  identiques — même enchaînement, mêmes logs, à trois constantes près.
+#  Elles tiennent maintenant dans une table, et leur corps est écrit une fois.
+#
+#  Les sources en DEUX temps (LinkedIn, HelloWork, Indeed, JobTeaser, WTTJ,
+#  Glassdoor) ne rentrent volontairement pas ici : chacune ordonne
+#  différemment recherche, fiche détaillée et filtre d'âge, et JobTeaser va
+#  jusqu'à devoir lire la fiche AVANT de connaître l'entreprise. Les plier au
+#  même moule demanderait plus de paramètres que de code partagé.
+# ------------------------------------------------------------------------
+
+SOURCES_SIMPLES = {
+    "adopte1dev": {
+        "module": "collectors.adopte1dev", "classe": "Adopte1Dev",
+        "delai": 1.5, "parametre": "contrats", "defaut": ["Alternance"],
+        "echec": "aucune offre — la taxonomie du site a-t-elle changé ?",
+    },
+    "devitjobs": {
+        "module": "collectors.devitjobs", "classe": "DevITJobs",
+        "delai": 1.5, "parametre": None,
+        "echec": "aucune offre — le flux RSS a-t-il changé de forme ?",
+    },
+    "welovedevs": {
+        "module": "collectors.welovedevs", "classe": "WeLoveDevs",
+        "delai": 1.5, "parametre": "contrats", "defaut": ["apprenticeship"],
+        "echec": "aucune offre — le facet de contrat a-t-il changé de nom ?",
+    },
+    "pass": {
+        "module": "collectors.pass_fp", "classe": "PassFonctionPublique",
+        "delai": 2.0, "parametre": "flux", "defaut": ["apprentissage"],
+        "echec": "aucune offre — le flux RSS a-t-il changé de forme ?",
+    },
+}
+
+
+def collecter_simple(args, cfg: dict, store: Store, source: str) -> None:
+    """Collecte en une passe, pour les sources qui livrent tout d'un coup."""
+    import importlib
+
+    regle = SOURCES_SIMPLES[source]
+    bloc = cfg.get(source, {})
+    heures, age_max = fenetre_de(args, bloc.get("age_max_jours", 14) * 24)
+
+    classe = getattr(importlib.import_module(regle["module"]), regle["classe"])
+    client = classe(delai=bloc.get("delai", regle["delai"]))
+
     cartes: dict[str, Job] = {}
+    # `parametre` nomme la clé de config qui décline la recherche : les
+    # contrats pour adopte1dev et WeLoveDevs, les flux pour PASS. À None, la
+    # source n'a rien à décliner et un seul appel suffit (DevITjobs).
+    valeurs = ([None] if not regle["parametre"]
+               else bloc.get(regle["parametre"], regle["defaut"]))
     try:
-        for contrat in a.get("contrats", ["Alternance"]):
-            for job in client.rechercher(contrat):
+        for valeur in valeurs:
+            try:
+                lot = client.rechercher() if valeur is None else client.rechercher(valeur)
+            except Exception as e:
+                log.error("« %s » — échec : %s", valeur, e)
+                continue
+            for job in lot:
                 cartes.setdefault(job.external_id, job)
-    except Exception as e:
-        log.error("échec : %s", e)
     finally:
         client.close()
 
     if not cartes:
-        log.error("aucune offre — la taxonomie du site a-t-elle changé ?")
+        log.error("%s", regle["echec"])
         return
 
-    surveiller(store, "adopte1dev", list(cartes.values()))
-    frais = filtrer_par_age(cartes, age_max, heures=heures)
-    store.maj_horodatages(frais.values())
+    enregistrer_lot(args, cfg, store, source, cartes, client.requetes,
+                    heures=heures, age_max=age_max)
 
-    connus = store.ids_connus("adopte1dev")
-    nouveaux = [c for c in frais.values() if c.external_id not in connus]
-    log.info("%d offres, %d dans la fenêtre, %d nouvelles (%d requêtes)",
-             len(cartes), len(frais), len(nouveaux), client.requetes)
 
-    retenues = sum(bool(store.upsert(preparer(job))) for job in nouveaux)
-    log.info("terminé — %d nouvelles offres adopte1dev", retenues)
-    cmd_stats(args, cfg, store)
+def cmd_adopte1dev(args, cfg: dict, store: Store) -> None:
+    """adopte1dev — job board 100 % développement, API WordPress ouverte."""
+    collecter_simple(args, cfg, store, "adopte1dev")
 
 
 def cmd_devitjobs(args, cfg: dict, store: Store) -> None:
     """DevITjobs.fr — flux RSS complet, IT généraliste.
 
-    Une passe suffit, comme pour PASS. Le site ne déclare pas l'alternance
-    comme type de contrat : c'est `classify.py` qui tranche sur le titre.
+    Le site ne déclare pas l'alternance comme type de contrat : c'est
+    `classify.py` qui tranche, et le garde-fou de `enregistrer_lot` qui évite
+    de stocker les 94 % qui n'en sont pas.
     """
-    from collectors.devitjobs import DevITJobs
-
-    d = cfg.get("devitjobs", {})
-    preparer = pipeline(cfg)
-    heures, age_max = fenetre_de(args, d.get("age_max_jours", 14) * 24)
-
-    client = DevITJobs(delai=d.get("delai", 1.5))
-    try:
-        cartes = {job.external_id: job for job in client.rechercher()}
-    except Exception as e:
-        log.error("échec : %s", e)
-        cartes = {}
-    finally:
-        client.close()
-
-    if not cartes:
-        log.error("aucune offre — le flux RSS a-t-il changé de forme ?")
-        return
-
-    surveiller(store, "devitjobs", list(cartes.values()))
-    frais = filtrer_par_age(cartes, age_max, heures=heures)
-    store.maj_horodatages(frais.values())
-
-    connus = store.ids_connus("devitjobs")
-    nouveaux = [c for c in frais.values() if c.external_id not in connus]
-    log.info("%d offres, %d dans la fenêtre, %d nouvelles (%d requêtes)",
-             len(cartes), len(frais), len(nouveaux), client.requetes)
-
-    retenues = sum(bool(store.upsert(preparer(job))) for job in nouveaux)
-    log.info("terminé — %d nouvelles offres devitjobs", retenues)
-    cmd_stats(args, cfg, store)
+    collecter_simple(args, cfg, store, "devitjobs")
 
 
 def cmd_welovedevs(args, cfg: dict, store: Store) -> None:
-    """WeLoveDevs — recherche Algolia, filtre de contrat côté serveur.
+    """WeLoveDevs — recherche Algolia, filtre de contrat côté serveur."""
+    collecter_simple(args, cfg, store, "welovedevs")
 
-    Comme Welcome to the Jungle, `contract_type` vient du facet du site :
-    pas de repasse par classify.py, le volume est simplement faible.
+
+def cmd_pass(args, cfg: dict, store: Store) -> None:
+    """PASS — flux RSS officiel de l'apprentissage dans la fonction publique.
+
+    Le collecteur le plus simple du projet : une requête, aucune fiche à
+    compléter. Le flux porte déjà les descriptions complètes, et jusqu'à
+    l'adresse de candidature.
     """
-    from collectors.welovedevs import WeLoveDevs
-
-    w = cfg.get("welovedevs", {})
-    preparer = pipeline(cfg)
-    heures, age_max = fenetre_de(args, w.get("age_max_jours", 14) * 24)
-
-    client = WeLoveDevs(delai=w.get("delai", 1.5))
-    cartes: dict[str, Job] = {}
-    try:
-        for contrat in w.get("contrats", ["apprenticeship"]):
-            for job in client.rechercher(contrat):
-                cartes.setdefault(job.external_id, job)
-    except Exception as e:
-        log.error("échec : %s", e)
-    finally:
-        client.close()
-
-    if not cartes:
-        log.error("aucune offre — le facet de contrat a-t-il changé de nom ?")
-        return
-
-    surveiller(store, "welovedevs", list(cartes.values()))
-    frais = filtrer_par_age(cartes, age_max, heures=heures)
-    store.maj_horodatages(frais.values())
-
-    connus = store.ids_connus("welovedevs")
-    nouveaux = [c for c in frais.values() if c.external_id not in connus]
-    log.info("%d offres, %d dans la fenêtre, %d nouvelles (%d requêtes)",
-             len(cartes), len(frais), len(nouveaux), client.requetes)
-
-    retenues = sum(bool(store.upsert(preparer(job))) for job in nouveaux)
-    log.info("terminé — %d nouvelles offres welovedevs", retenues)
-    cmd_stats(args, cfg, store)
+    collecter_simple(args, cfg, store, "pass")
 
 
 def cmd_lba(args, cfg: dict, store: Store) -> None:

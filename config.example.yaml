@@ -143,7 +143,8 @@ recherche:
   # via le texte des offres (bonus "télétravail" plus bas).
   inclure_remote: false
 
-  # N'ENREGISTRER QUE LES ALTERNANCES (collecte LinkedIn).
+  # N'ENREGISTRER QUE LES ALTERNANCES — s'applique à TOUTES les sources.
+  #
   # LinkedIn n'a aucun filtre « alternance » : on requête large et 80 % de ce
   # qui revient n'en est pas. Tout stocker avait produit 24 763 lignes pour
   # 71 offres exploitables — 0,3 % — qui diluent le digest et alourdissent
@@ -151,7 +152,25 @@ recherche:
   # Mesuré avant d'activer : sur les 4 389 offres LinkedIn ayant une
   # description, 8 seulement (0,2 %) devaient leur détection à celle-ci
   # plutôt qu'à leur intitulé, toutes à score faible.
-  # `false` pour revenir à l'ancien comportement et tout conserver.
+  #
+  # Le réglage vivait ici mais ne s'appliquait QU'À LinkedIn, alors que
+  # DevITjobs, JobTeaser, Glassdoor et Indeed sont exactement dans le même
+  # cas — pas de filtre de contrat côté serveur. Constaté en base :
+  # DevITjobs y tenait 1 802 lignes pour 109 alternances, soit 41 % de la
+  # base et 4,2 Mo de descriptions pour rien.
+  #
+  # Sans effet sur les sources à filtre natif (HelloWork `c=Alternance`,
+  # WTTJ `APPRENTICESHIP`, WeLoveDevs, adopte1dev, PASS) : tout ce qui en
+  # vient est déjà une alternance.
+  #
+  # Une source peut y déroger dans son propre bloc, p. ex. :
+  #     devitjobs:
+  #       stocker_alternance_seulement: false
+  #
+  # `false` ici pour revenir partout à l'ancien comportement. Réversible :
+  # `est_alternance` ne dépend pas de ce fichier, donc aucun réglage de poids
+  # ne peut rendre exploitable ce qui est écarté — contrairement à un seuil
+  # de score, qui aurait rendu `rescore` menteur.
   stocker_alternance_seulement: true
 
   # Fenêtre temporelle en heures. 336 h = 2 semaines : au-delà, une offre
@@ -168,6 +187,17 @@ recherche:
   # (fenêtre 24 h) la pagination s'arrête d'elle-même bien avant.
   max_pages_par_requete: 15
   max_details_par_run: 250      # nb max de fiches détaillées par run
+
+  # PART DU BUDGET DE FICHES RÉSERVÉE AU RATTRAPAGE (0 à 1).
+  # Le rattrapage se contentait du reste — `max_details_par_run` moins les
+  # nouveautés — donc de rien du tout les jours chargés. Résultat en base :
+  # 178 offres LinkedIn retenues à `detail_essais = 0`, jamais tentées une
+  # seule fois. Or une offre sans description n'est scorée que sur son titre,
+  # et ça se voit : -32 de score moyen contre +8 pour celles qui en ont une.
+  # Elles ne sont pas mauvaises, elles sont muettes — et se font enterrer.
+  # C'est un PLANCHER : le budget que les nouveautés ne consomment pas revient
+  # au rattrapage comme avant. 0 pour l'ancien comportement.
+  part_backlog: 0.25
 
 # ------------------------------------------------------------
 #  HelloWork (collecteur séparé : `main.py hellowork`)
@@ -526,6 +556,16 @@ exclusions:
              # Constatées dans le digest, aucun mot-clé dans leur raison
              # sociale. AURLOM pesait à lui seul 57 offres en base.
              "aurlom", "scholia", "wijin", "eduservices",
+             # Deuxième vague, relevée sur les 1 139 offres retenues : des
+             # écoles dont le nom ne dit rien et que la règle de courtage ne
+             # voit pas, faute de marqueur textuel (Glassdoor tronque les
+             # descriptions à 250 caractères). Identifiées une par une :
+             #   Mewo             11 offres — « campus », « partenaire »
+             #   Groupe Alternance 8 offres — « école », « campus », « admission »
+             #   ESIIA             5 offres — École Supérieure d'Informatique,
+             #                     reconnue au nom seul, ses annonces Glassdoor
+             #                     étant trop tronquées pour montrer un marqueur
+             "mewo", "groupe alternance", "esiia",
              "education", "educative", "educatif", "esg montpellier",
              # « galileo » tout court écartait GALILEO NETWORK, éditeur de
              # logiciels de 3-5 personnes (NAF 5829C) — même erreur que
@@ -535,6 +575,19 @@ exclusions:
     # « dassault » tout court écartait aussi Dassault Systèmes, éditeur de
     # logiciels (CATIA, SOLIDWORKS) et non armurier. Le motif est restreint à
     # l'avionneur militaire pour garder les offres de Dassault Systèmes.
+
+    # Intermédiaires de recrutement — ni employeurs, ni écoles.
+    #
+    # « Forums Talents Handicap » est un ORGANISATEUR de forums qui republie
+    # les annonces d'autres entreprises sous sa propre raison sociale : 16
+    # offres en base, dont les quatre premières du digest. Le problème n'est
+    # pas qu'elles soient mauvaises — c'est que le champ `company` ment. Il
+    # casse le dédoublonnage (la même offre Sopra Steria comptait deux fois,
+    # à 103 et à 78), le gate écoles, et jusqu'à la candidature elle-même :
+    # on postulerait à l'organisateur du salon, pas à l'employeur.
+    # Les vraies offres arrivent de toute façon par leur source d'origine.
+    intermediaires: ["forums talents handicap", "talents handicap"]
+
     armement: ["armement", "armements", "defense", "defence", "militaire",
                "thales", "naval group", "dcns", "mbda", "nexter", "knds",
                "arquus", "dga", "direction generale de l armement", "safran",
@@ -588,9 +641,24 @@ exclusions:
   # « possibilité de CDI à l'issue de l'alternance » est un argument de vente,
   # pas un type de contrat.
   contrats:
+    # « stage » n'est PAS dans cette liste, et ne doit pas y entrer : un motif
+    # brut écarterait aussi les 33 offres titrées « Stage / Alternance », qui
+    # sont de vraies doubles opportunités. Le cas a sa propre règle ci-dessous.
     exclus: ["cdi", "contrat a duree indeterminee", "freelance", "independant",
              "portage salarial", "interim", "consultant independant",
              "service civique", "volontariat", "vie", "vsi", "benevolat"]
+
+    # STAGE SEUL DANS L'INTITULÉ.
+    # 29 offres portaient « Stage » en titre sans aucune mention d'alternance,
+    # et occupaient les QUATRE premières places du digest (103, 97, 78, 70).
+    # Elles passaient par `contract_type` : Indeed y recopie le menu de filtres
+    # coché par l'employeur (« stage apprentissage contrat d'apprentissage »),
+    # que `est_alternance` prenait pour une déclaration — même piège que le
+    # formulaire d'alerte HelloWork, qui avait fait exclure ses 363 offres.
+    # Leurs descriptions citent bien « alternance », mais comme perspective :
+    # « à l'issue », « possibilité de continuer en », « stage M2 suivi d'une ».
+    # `false` pour les revoir (puis `rescore` — rien n'est supprimé).
+    stage_sans_alternance: true
 
   # Contre-exemples — prioritaires sur toute exclusion ci-dessus.
   # Toute liste sectorielle produit des faux positifs ; c'est ici qu'on les
@@ -622,6 +690,14 @@ exclusions:
       - "pour l une de ses entreprises"
       - "pour le compte de l une de"
       - "nos entreprises partenaires"
+      # Relevés sur les offres retenues, 0 faux positif sur 1 139 :
+      #   « processus d'admission dans l'école »  -> Coda (France), 5 offres
+      #   « une entreprise + une formation »      -> SKILLIE, 6 offres
+      # Deux écoles qui vendent le placement, sans jamais dire « CFA ».
+      - "admission dans l ecole"
+      - "processus d admission"
+      - "une entreprise + une formation"
+      - "une entreprise et une formation"
 
   exceptions:
     - "banques alimentaires"    # association caritative, pas un établissement bancaire
@@ -706,7 +782,6 @@ scoring:
   # `exclusions.secteurs.ecoles` — elles ne s'affichent plus du tout.
 
   bonus:
-    - {points: 12, motifs: ["3 semaines", "3 sem", "rythme 3 1"],                   libelle: "rythme 3/1 compatible"}
     # Le MSc dure 2 ans : un contrat de 2 ans couvre tout le cursus, c'est
     # exactement ce que cherchent les entreprises qui recrutent en alternance.
     - {points: 10, motifs: ["2 ans", "24 mois", "sur 2 ans", "deux ans"],           libelle: "contrat 2 ans (MSc complet)"}
@@ -730,7 +805,6 @@ scoring:
     # ce qui correspond au profil. On ne pénalise que le diplôme déjà obtenu.
     - {points: -25, motifs: ["bac+5 valide", "bac+5 obtenu", "m2 uniquement", "diplome bac+5 requis", "deja diplome"], libelle: "Bac+5 déjà validé exigé"}
     - {points: -20, motifs: ["3 ans d experience", "5 ans d experience", "experience confirmee", "senior", "profil confirme", "lead"], libelle: "expérience senior"}
-    - {points: -15, motifs: ["1 semaine 1 semaine", "1 sem 1 sem", "rythme 1 1", "2 jours 3 jours"], libelle: "rythme incompatible"}
     # SUPPRIMÉ — un malus « hors cible métier » portant sur tout le texte
     # ("commercial", "marketing", "vente", "recrutement", "comptabilite").
     # Il était à la fois redondant et nuisible : ces mots figurent déjà dans
